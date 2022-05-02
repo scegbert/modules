@@ -1,0 +1,13 @@
+--------------------------------------------------------------------------------
+Notes for run started 2020-01-24_17_07_52: 
+
+Pre-AFRL test measurement.
+Laser: Platteville DCS with Wenzel clock. External amplifiers to 50/50, then fiber filter.
+One fiber-filter channel to H2O reference laser, other channel to OSA.
+
+Distorted IG and higher FFT noise than expected.
+Sean thinks influence of out-of-band light, maybe the 15xx nm low-pass filter in the fiber filter is not enough for the external amplifiers.
+
+Gas: H2O reference cell purchased December 2019
+5 Torr H2O in 16.5 cm fiber-coupled cell.
+--------------------------------------------------------------------------------
