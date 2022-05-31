@@ -13,6 +13,7 @@ You can apply a constraint to match, say, pathlength, pressure, temperature of e
 Created on Tue Nov  5 13:30:40 2019
 
 @author: Nate Malarich
+significant modifications by: Scott
 """
 # built-in modules
 import numpy as np
@@ -170,7 +171,8 @@ def spectra_single(xx, mol_id, iso, molefraction, pressure,
     else:
         TD_fit = np.fft.irfft(coef * pathlength)
         
-    # print('y='+str(np.round(molefraction,2))+'     shift='+str(np.round(shift,4))+'     T='+str(np.round(temperature,0)))
+    #print('y='+str(np.round(molefraction,6)*100)+'%     shift='+str(np.round(shift,6))
+    #                +'     T='+str(np.round(temperature,4))+'     P='+str(np.round(pressure,6)))
     
     return TD_fit
     
@@ -251,6 +253,7 @@ def spectra_single_lmfit(prefix='', sd = False, apod = False):
     mod.set_param_hint('pathlength',min=0)
     mod.set_param_hint('molefraction',min=0,max=1)
     mod.set_param_hint('shift',value=0,min=-.2,max=.2)
+    
     if apod: 
         mod.set_param_hint('i_fit_start',min=0,vary = False)
         mod.set_param_hint('i_fit_stop',min=0,vary = False)
@@ -268,7 +271,55 @@ def spectra_single_lmfit(prefix='', sd = False, apod = False):
     pars[prefix + 'molefraction'].value = 0.01
         
     return mod, pars
+    
+def spectra_cross_section_lmfit(prefix=''):
+    '''
+    Set up lmfit model with function hints for cross sectional database
+    '''
 
+    mod = Model(spectra_cross_section, independent_vars=['xx', 'xx_HITRAN', 'coef_HITRAN'], prefix = prefix)
+        
+    mod.set_param_hint('pressure', value=640/760, min=0)
+    mod.set_param_hint('temperature', value=296, min=0)
+    mod.set_param_hint('pathlength', value = 100, min=0)
+    mod.set_param_hint('molefraction', value = 0.01, min=0,max=1)
+    mod.set_param_hint('shift', value=0, min=-.2, max=.2)
+        
+    pars = mod.make_params()
+            
+    return mod, pars
+    
+
+def spectra_cross_section(xx, xx_HITRAN, coef_HITRAN, molefraction, pressure, temperature, pathlength, shift):
+    '''
+    Spectrum calculation for adding multiple models with composite model.
+    
+    See lmfit model page on prefix, parameter hints, composite models.
+    
+    INPUTS:
+        xx -> wavenumber array (cm-1)
+        ceoffs -> pass in the absorption coefficients from the sigma or xsc HITRAN file
+        molefraction
+        pressure -> (atmospheres)
+        temperature -> kelvin
+        pathlength (centimeters)
+        shift -> (cm-1) calculation relative to Hitran
+    
+    TODO - scale by pressure per Amanda's mFID stuff
+    
+    '''
+    
+    coef_HITRAN_interp = np.interp(xx, xx_HITRAN + shift, coef_HITRAN)
+
+    coef = coef_HITRAN_interp * hapi.volumeConcentration(molefraction*pressure, temperature)
+
+    TD_fit = np.fft.irfft(coef * pathlength)
+    
+    # progress report if you would like it: 
+    print('y='+str(np.round(molefraction,2))+'     shift='+str(np.round(shift,4))+'     T='+str(np.round(temperature,0)))
+    
+    return TD_fit
+    
 def spectra_sd(xx, mol_id, iso, molefraction, pressure, 
                    temperature, pathlength, shift, name = 'H2O', flip_spectrum=False):
     '''
