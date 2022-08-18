@@ -106,7 +106,7 @@ def par_to_df(hit_file, nu_min = 0, nu_max = 10000):
 #        df_air['Smax'] = df_air['sw']*(.518*df_air['elower']/296)**(-2.77) * np.exp(-1.435 * df_air['elower']*(1/(.518 * df_air['elower']) - 1/296))
     return df_air
     
-def df_to_par(df, par_name, suffix = '', extra_params = {}, save_dir = None):
+def df_to_par(df, par_name, suffix = '', extra_params = {}, save_dir = None, print_name = True):
     '''
     Turns dataframe linelist into .data file for hapi.
     
@@ -131,7 +131,7 @@ def df_to_par(df, par_name, suffix = '', extra_params = {}, save_dir = None):
         for i in range(len(df)):
             added_quanta = False
             for name in HITRAN_DEFAULT_HEADER['order']:
-                print(name)
+                if print_name: print(name)
                 # Many of these string-writing operations are more difficult than they need to be.
                 # Writing code for each exception.
                 try:

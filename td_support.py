@@ -171,7 +171,7 @@ def spectra_single(xx, mol_id, iso, molefraction, pressure,
     else:
         TD_fit = np.fft.irfft(coef * pathlength)
         
-    #print('y='+str(np.round(molefraction,6)*100)+'%     shift='+str(np.round(shift,6))
+    # print('y='+str(np.round(molefraction,6)*100)+'%     shift='+str(np.round(shift,6))
     #                +'     T='+str(np.round(temperature,4))+'     P='+str(np.round(pressure,6)))
     
     return TD_fit
@@ -316,7 +316,7 @@ def spectra_cross_section(xx, xx_HITRAN, coef_HITRAN, molefraction, pressure, te
     TD_fit = np.fft.irfft(coef * pathlength)
     
     # progress report if you would like it: 
-    print('y='+str(np.round(molefraction,2))+'     shift='+str(np.round(shift,4))+'     T='+str(np.round(temperature,0)))
+    # print('y='+str(np.round(molefraction,2))+'     shift='+str(np.round(shift,4))+'     T='+str(np.round(temperature,0)))
     
     return TD_fit
     
