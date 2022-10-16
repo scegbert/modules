@@ -30,7 +30,6 @@ import matplotlib.pyplot as plt
 # path.append(r'C:\Users\scott\Documents\1-WorkStuff\code\scottcode\modules') # hopefully this occurs in the calling function
 
 import linelist_conversions as db
-import fig_format
 from hapi import partitionSum # hapi has Q(T) built into the script, with this function to call it
 
 import pandas as pd
@@ -46,7 +45,7 @@ lines_header_lwa = 18 # number of lines per header in lwa file
 
 #%% measurement specific parameters
 
-meas_T_round = 25 # round meaurement temperature to the nearest value (allows 905 and 895 to be grouped together if desired)
+meas_T_round = 50 # round meaurement temperature to the nearest value (allows 905 and 895 to be grouped together if desired)
 meas_P_round = 0.5 # round measurement pressure to the nearest value (0.5 groups pressure as 0.5, 1.0, 1.5, 16.5, etc.)
 
 q0offset = 0 # how many 0's come before the actual quantum number pairs (I have seen 0 and 2)
@@ -116,82 +115,25 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None):
         df_load['ratio_max'] = df_ratio.values.max(axis=1)
 
         if d_old is not None: df_load['ratio_max_og'] = df_load['ratio_max'] + np.log10(df_old.sw / df_load.sw) # log(a*b) = log(a) + log(b) 
-        
-    quanta = df_load.quanta.str.replace('-',' -').replace('q','').str.split(expand=True).astype('int32') # looking for doublets (watch out for negative quanta without spaces, ie -2-2-2)
+    
+    
+    # improve organization of the quantum information 
+    
+    quanta = df_load.quanta.str.replace('-',' -').replace('q','').str.split(expand=True) # looking for doublets (watch out for negative quanta without spaces, ie -2-2-2)
+    
+    try: quanta = quanta.drop(columns=[12]) # if present, the 13th column is a row of NANs from the trailing space. remove if needed
+    except: pass
+    
     if quanta.isnull().to_numpy().any(): please = stop # if anything got input as None, that means we're missing something. Let's do a quick check for that  
     
-    df_load['doublet'] = False
-    df_load['doubletPR'] = False # f <- i, i <- f doublet (reversed quanta, P and R branches) unique from normal doublets
+    df_load['vp'] = ''
+    df_load['vpp'] = ''
     
-    doublet_width = 20
-    for ip in range(1,doublet_width+1):
-        for i in [-ip, ip]: 
+    which = (quanta[0].astype('int32')>=0)&(quanta[1].astype('int32')>=0)&(quanta[2].astype('int32')>=0)&(
+             quanta[3].astype('int32')>=0)&(quanta[4].astype('int32')>=0)&(quanta[5].astype('int32')>=0) # let's ignore negative values
             
-            quanta_shift = quanta.shift(i, fill_value=999) # value that clearly isn't a quantum number
-            diff_v = quanta.iloc[:, list(range(6+q0offset))] - quanta_shift.iloc[:, list(range(6+q0offset))] # delta v's (v1'_0 - v1'_i)
-            
-            rotation_p_index = [6+q0offset, 7+q0offset, 8+q0offset]
-            rotation_pp_index = [9+q0offset, 10+q0offset, 11+q0offset]
-            
-            rotation_p_0 = quanta.iloc[:, rotation_p_index] # J' Ka' Kc' for feature 0
-            rotation_pp_0 = quanta.iloc[:, rotation_pp_index]  # J'' Ka'' Kc'' for feature 0
-            
-            rotation_p_i = quanta_shift.iloc[:, rotation_p_index] # J' Ka' Kc' for feature i
-            rotation_pp_i = quanta_shift.iloc[:, rotation_pp_index] # J'' Ka'' Kc'' for feature i
-            
-            diff_mass = df_load.mass - df_load.mass.shift(i, fill_value=999) # difference in molecular mass
-
-            boolean_doublet = ( (diff_v == 0).all(axis=1) # same vibrational state
-                               &(rotation_p_0.iloc[:,0]  == rotation_p_i.iloc[:,0]) # same J' 
-                               &(rotation_pp_0.iloc[:,0] == rotation_pp_i.iloc[:,0]) # same J''
-                               &(np.round(diff_mass,1) == 0) # same MW
-                               &(
-                                 ((rotation_p_0.iloc[:,1]  == rotation_p_i.iloc[:,1]) # same Ka'
-                                 &(rotation_pp_0.iloc[:,1] == rotation_pp_i.iloc[:,1]) # same Ka''
-                                 &((rotation_p_0.iloc[:,2]  - rotation_p_i.iloc[:,2]).abs() == 1) # Kc' differ by +/-1
-                                 &((rotation_pp_0.iloc[:,2] - rotation_pp_i.iloc[:,2]).abs() == 1) # Kc'' differ by +/-1
-                                 )
-                                |
-                                 ((rotation_p_0.iloc[:,2]  == rotation_p_i.iloc[:,2]) # same Kc'
-                                 &(rotation_pp_0.iloc[:,2] == rotation_pp_i.iloc[:,2]) # same Kc''
-                                 &((rotation_p_0.iloc[:,1]  - rotation_p_i.iloc[:,1]).abs() == 1) # Ka' differ by +/-1
-                                 &((rotation_pp_0.iloc[:,1] - rotation_pp_i.iloc[:,1]).abs() == 1) # Ka'' differ by +/-1
-                                 ) 
-                                )
-                               )
-            
-         
-            for j in boolean_doublet[boolean_doublet].index: # check all newly found doublets to see if that feature already has a different doublet nearby
-                if df_load.doublet[j] != False: 
-                    print('********* multiple doublets ' + str(int(j)).rjust(6) + ':  ' 
-                            + str(int(j-i)).rjust(6) + ' & ' + str(int(df_load.doublet[j])).rjust(6))
-                    
-            df_load.doublet.loc[boolean_doublet] = df_load[boolean_doublet].index - i
-            df_load.doublet[df_load.doublet > feature_new] = False # don't bother with our new (quantum-less) features
-            
-            boolean_doubletPR = ( (diff_v == 0).all(axis=1) # same vibrational state
-                                 &(np.round(diff_mass,1) == 0) # same MW
-                                 &(rotation_p_0.T.reset_index(drop=True).T == rotation_pp_i.T.reset_index(drop=True).T).all(axis=1) 
-                                  # (J' Ka' Kc')0 = (J'' Ka'' Kc'')i (dropping column names to allow comparison)
-                                 &(rotation_p_i.T.reset_index(drop=True).T == rotation_pp_0.T.reset_index(drop=True).T).all(axis=1) 
-                                  # (J' Ka' Kc')i = (J'' Ka'' Kc'')0 (dropping column names to allow comparison)
-                                 & ~boolean_doublet # only keep if unique (Kc or Ka = J doublets are also f <- i, i <- f)
-                                )
-            
-            for j in boolean_doubletPR[boolean_doubletPR].index: # print all f <- i, i <- f doublets
-                if j < feature_new and str(i)[0] == '-': # ignore new features, +/- are reciprical (only want one)
-                    print('******************* f <- i, i <- f doublet ' + str(int(j)).rjust(6) + ' & ' + str(int(j-i)).rjust(6))
-            
-            df_load.doubletPR.loc[boolean_doubletPR] = df_load[boolean_doubletPR].index - i
-            df_load.doubletPR[df_load.doubletPR > feature_new] = False # don't bother with our new (quantum-less) features
-            
-    df_load['v1p'] = quanta[0+q0offset].astype(int) # extract v1' value
-    df_load['v2p'] = quanta[1+q0offset].astype(int) # extract v2' value
-    df_load['v3p'] = quanta[2+q0offset].astype(int) # extract v3' value
-    
-    df_load['v1pp'] = quanta[3+q0offset].astype(int) # extract v1" value
-    df_load['v2pp'] = quanta[4+q0offset].astype(int) # extract v2" value
-    df_load['v3pp'] = quanta[5+q0offset].astype(int) # extract v3" value
+    df_load.vp[which] = (quanta[0+q0offset]+quanta[1+q0offset]+quanta[2+q0offset])[which] # extract v' values (add strings, ie 000 or 101s)
+    df_load.vpp[which] = (quanta[3+q0offset]+quanta[4+q0offset]+quanta[5+q0offset])[which] # extract v' values (add strings, ie 000 or 101s)
     
     df_load['Jp'] = quanta[6+q0offset].astype(int) # extract J' value
     df_load['Kap'] = quanta[7+q0offset].astype(int) # extract Ka' value
@@ -201,24 +143,55 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None):
     df_load['Kapp'] = quanta[10+q0offset].astype(int) # extract Ka" value
     df_load['Kcpp'] = quanta[11+q0offset].astype(int) # extract Kc" value
     
-    df_load['Jdelta'] = df_load['Jp'] - df_load['Jpp']
-    df_load['Kadelta'] = df_load['Kap'] - df_load['Kapp']
-    df_load['Kcdelta'] = df_load['Kcp'] - df_load['Kcpp']
-
-    df_load['taup_fam'] =  df_load['Kap'] +  df_load['Kcp']  - df_load['Jp'] # tau' family is 0 or 1
-    df_load['taupp_fam'] = df_load['Kapp'] + df_load['Kcpp'] - df_load['Jpp'] # tau'' family is 0 or 1
-    
-    df_load['Jm'] = df_load[['Jp', 'Jpp']].max(axis=1) # max of J
-    df_load['Km'] = df_load[['Kap', 'Kapp']].max(axis=1) # max of Ka (see toth self-broadened widths)
+    Jdelta = df_load['Jp'] - df_load['Jpp']
     
     df_load['m'] = 999
-    df_load.m[df_load.Jdelta == 1]  =  df_load.Jpp[df_load.Jdelta == 1] # m = J''+1 = J' for delta J = 1 (R branch)
-    df_load.m[df_load.Jdelta == 0]  =  df_load.Jpp[df_load.Jdelta == 0] # m = J'' when delta J = 0 (Q branch)
-    df_load.m[df_load.Jdelta == -1] = -df_load.Jpp[df_load.Jdelta == -1] # m = -J'' for delta J = -1 (P branch)
+    df_load.m[Jdelta == 1]  =  df_load.Jpp[Jdelta == 1] # m = J''+1 = J' for delta J = 1 (R branch)
+    df_load.m[Jdelta == 0]  =  df_load.Jpp[Jdelta == 0] # m = J'' when delta J = 0 (Q branch)
+    df_load.m[Jdelta == -1] = -df_load.Jpp[Jdelta == -1] # m = -J'' for delta J = -1 (P branch)
+
+    taup =  df_load['Kap'] +  df_load['Kcp']  - df_load['Jp'] # tau' family (0 or 1)
+    taupp = df_load['Kapp'] + df_load['Kcpp'] - df_load['Jpp'] # tau'' family (0 or 1)
+        
+    df_load['tau'] = taup.astype(str) + taupp.astype(str)
+    df_load.tau = df_load.tau.where(df_load.tau.isin(['00','01','10','11']), other='') # only keep posible transitions (possible for us)
     
+    df_load['Jdelta'] = Jdelta
+    df_load['Kadelta'] = df_load['Kap'] - df_load['Kapp']
+    df_load['Kcdelta'] = df_load['Kcp'] - df_load['Kcpp']
+    
+    # df_load['Jm'] = df_load[['Jp', 'Jpp']].max(axis=1) # max of J
+    # df_load['Km'] = df_load[['Kap', 'Kapp']].max(axis=1) # max of Ka (see toth self-broadened widths)
+        
     # Wagner Collisional Parameters (Temp) pg 217 bottom
     # Bernath book (spectra of atoms) pg 357 bottom
+    
+    
+    # identify doublets
+    
+    df_load['doublets'] = np.empty((len(df_load), 0)).tolist()
+    df_load['reversed'] = np.empty((len(df_load), 0)).tolist()
 
+    for i_feature in df_load[df_load.ratio_max>-1].index.tolist():
+        
+        which_doub = (((df_load.vp == df_load.vp[i_feature]) & (df_load.vpp == df_load.vpp[i_feature]) &
+                     (df_load.Jp == df_load.Jp[i_feature]) & (df_load.Jpp == df_load.Jpp[i_feature]) & 
+                     (df_load.index != i_feature) & (df_load.index < feature_new) &
+                     (df_load.local_iso_id == df_load.local_iso_id[i_feature])) 
+                     &
+                     (((df_load.Kap == df_load.Kap[i_feature]) & (df_load.Kapp == df_load.Kapp[i_feature])) | 
+                     ((df_load.Kcp == df_load.Kcp[i_feature]) & (df_load.Kcpp == df_load.Kcpp[i_feature]))))
+        
+        which_rev = ((df_load.vp == df_load.vp[i_feature]) & (df_load.vpp == df_load.vpp[i_feature]) & # reverse rotation
+                     (df_load.Jpp == df_load.Jp[i_feature]) & (df_load.Jp == df_load.Jpp[i_feature]) & 
+                     (df_load.Kapp == df_load.Kap[i_feature]) & (df_load.Kap == df_load.Kapp[i_feature]) & 
+                     (df_load.Kcpp == df_load.Kcp[i_feature]) & (df_load.Kcp == df_load.Kcpp[i_feature]) & 
+                     (df_load.index < feature_new) & (df_load.local_iso_id == df_load.local_iso_id[i_feature])) 
+        
+        df_load['doublets'][i_feature] = df_load[which_doub].index.tolist()
+        df_load['reversed'][i_feature] = df_load[which_rev].index.tolist()
+
+            
     return df_load
 #%%
 def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=False, prop3=False, df_props_old=None, plots=True):
@@ -359,7 +332,7 @@ def labfit_to_spectra(d_labfit, bins, bin_name, og = False, d_load=False):
         index_meas = index_meas_all[i]
         try: index_meas_next = index_meas_all[i+1]
         except: index_meas_next = -1 # this is the last measurement (go to the end)
-
+                
         T_i = round((float(lwa_all[index_meas+3].split()[1]) + 273)/meas_T_round)*meas_T_round # round to the nearest meas_T_round
         P_i = round(float(lwa_all[index_meas+3].split()[2])/meas_P_round)*meas_P_round # round to the nearest meas_P_round
         
@@ -448,7 +421,7 @@ def strength_T(T, elower, nu, Tref=296, molec_id = 1, iso = 1):
     
     return Qref/Q * boltzman * stimulated # S(T) = S(Tref) * Qref/Q * boltzman * stimulated 
 #%%
-def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=False, features=False):
+def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=False, features=False, axis_labels=True):
     r'''
     Overview:
         plots output of labfit_to_spectra grouping things by temperature (or whatever variable you feed in as T)
@@ -459,9 +432,9 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
         
     r'''
         
-    plt.figure(figsize=(6, 4), dpi=200, facecolor='w', edgecolor='k')
+    plt.figure(figsize=(6, 4), dpi=150, facecolor='w', edgecolor='k')
     
-    colors = ['darkorange','limegreen','royalblue','cyan','violet','brown']
+    colors = ['gold','coral','violet','royalblue','deepskyblue','cyan']
     
     for T_i in sorted(set(T)): # iterate through all of the temperatures that were measured
         color_i = colors[sorted(set(T)).index(T_i)] # which color for this temperature? 
@@ -482,17 +455,19 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
                 if value: 
                     plt.plot([df.loc[index].nu_og, df.loc[index].nu], [df.loc[index].ratio_max_og+100, df.loc[index].ratio_max+100], color=colors[5])
         
-        plt.plot(df.nu[df.doublet!=False], df[df.doublet!=False].ratio_max+100, 'r+', markersize=15, label='doublets') # overlay the doublets
+        # overlay the doublets and reversals
+        plt.plot(df.nu[df.doublets.astype(bool)], df[df.doublets.astype(bool)].ratio_max+100, 'g+', markersize=10, label='doublets') 
+        plt.plot(df.nu[df.reversed.astype(bool)], df[df.reversed.astype(bool)].ratio_max+100, 'bx', markersize=10, label='reversed') 
         
         if prop is not False:
             plt.plot(df[df['uc_'+prop[0]] > -1].nu, 
                      df[df['uc_'+prop[0]] > -1].ratio_max+100, 
-                         'kx', markersize=10, label='floated '+prop[1]) # overlay floated features
+                         'mx', markersize=15, label='floated '+prop[1]) # overlay floated features
             
         if prop2 is not False:
             plt.plot(df[df['uc_'+prop2[0]] > -1].nu, 
                      df[df['uc_'+prop2[0]] > -1].ratio_max+100, 
-                         'b1', markersize=15, label='floated '+prop2[1]) # overlay floated features
+                         'c1', markersize=20, label='floated '+prop2[1]) # overlay floated features
         
         if features is not False:
             plt.plot(df[df.index.isin(features)].nu, df[df.index.isin(features)].ratio_max+100, 'y3', markersize=15, label='verify') # overlay other features
@@ -505,11 +480,17 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
             else: 
                 colorj = 'r' # usually below noise floor
             
-            if (df.doublet[df.index==j] != False).values[0]: 
-                plt.annotate(str(j) + ' (' + str(int(df.doublet[j])) + ')',(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
-            else: 
-                plt.annotate(str(j),(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for non-doublets
-    
+            doub_rev_names = ''
+            if df.doublets.astype(bool)[j]: 
+                
+                for doublet in df.doublets[j]: 
+                    if doublet == df.doublets[j][0]: doub_rev_names += ' d' + str(int(doublet))
+                    else: doub_rev_names += ', d' + str(int(doublet))
+                
+            if df.reversed.astype(bool)[j]: doub_rev_names += ' r' + str(int(df.reversed[j][0]))
+                                
+            plt.annotate(str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+         
     wvn_min = min(map(min, wvn))
     wvn_max = max(map(max, wvn))
     
@@ -518,9 +499,10 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
     if res_og is not False: plt.hlines(100+offset*2, wvn_min, wvn_max, colors='k', linestyles='dashed', linewidth=5)
     
     plt.legend(loc='lower right')
-    plt.xlabel('wavenumber $(cm^{-1})$')
-    plt.ylabel('Percent Transmission and Residual+' + str(100+offset))  
-    if res_og is not False: plt.ylabel('Percent Transmission, Residual+' + str(100+offset) + ', Original Residual+' + str(100+offset*2))  
+    if axis_labels: 
+        plt.xlabel('wavenumber $(cm^{-1})$')
+        plt.ylabel('Trans and Residual+' + str(100+offset))  
+        if res_og is not False: plt.ylabel('Trans, Res +' + str(100+offset) + ', OG Res+' + str(100+offset*2))  
 
     return
 #%% 
@@ -580,14 +562,19 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
     
     else: 
         
-        shutil.copy2(d_input + '.sho', d_og + '.sho') # save a copy of all files as og files
-        shutil.copy2(d_input + '.rei', d_og + '.rei') 
-        shutil.copy2(d_input + '.plt', d_og + '.plt') 
-        shutil.copy2(d_input + '.lwa', d_og + '.lwa') 
-        shutil.copy2(d_input + '.inp', d_og + '.inp') 
-        shutil.copy2(d_input + '.dtl', d_og + '.dtl') 
+        if not os.path.exists(d_input): # make a new folder if needed
+            os.makedirs(d_input)
+        
+        d_file = r'\{}-000-og'.format(bin_name)
+        
+        shutil.copy2(d_input + '.sho', d_input + d_file + '.sho') # save a copy of all files as og files
+        shutil.copy2(d_input + '.rei', d_input + d_file + '.rei') 
+        shutil.copy2(d_input + '.plt', d_input + d_file + '.plt') 
+        shutil.copy2(d_input + '.lwa', d_input + d_file + '.lwa') 
+        shutil.copy2(d_input + '.inp', d_input + d_file + '.inp') 
+        shutil.copy2(d_input + '.dtl', d_input + d_file + '.dtl') 
    
-        print('file saved as: ' + d_og)
+        print('file saved as: ' + d_file)
     
     return
     
@@ -627,10 +614,10 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
     for i in features: 
         
         line = lines_until_features + lines_per_feature*i - 2
-
+    
         if int(rei_all[line-2].split()[0]) != i: # check if the feature changed places with a neighbor (nu)
             line = floated_line_moved(line, i, rei_all, lines_per_feature)
-            
+        
         rei_all[line] = rei_all[line][0:prop[2]*3] + '0' + rei_all[line][prop[2]*3+1:] # 0 means to float this parameter
         
         if prop[0]=='sd_self' and nudge_sd: 
@@ -763,6 +750,10 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
     r'''
     Overview: 
         add a new feature to the INP file, currently numbers that feature starting at 1,XX0,001 with the bin number as XX
+        
+        if you're getting weird errors on features that should be plenty big for fitting, you might need to increase S296 to snag them 
+        if they're below noise floor in first iteration, it gets mad as it varies parameters it doesn't think it can see
+        
     Returns: 
         
     Inputs:
@@ -775,9 +766,10 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
     elif use_which == 'inp_new': rei_all = open(d_file+'.inp', "r").readlines() # newest INP file (being used by labfit)
     elif use_which == 'rei_saved': # revert to most recent saved REI file
     
-        num_file = int(os.listdir(os.path.join(d_folder, bin_name))[-1][3:6]) # find the file with the highest number in the "save" folder        
-        rei_all = open(os.path.join(d_folder, bin_name, os.listdir(os.path.join(d_folder, bin_name))[-1]), "r").readlines()
-        use_which = os.listdir(os.path.join(d_folder, bin_name))[-1]
+        num_file = int(os.listdir(os.path.join(d_folder, bin_name))[-1][3:6]) # find the file with the highest number in the "save" folder  
+        use_which = os.listdir(os.path.join(d_folder, bin_name))[-1][:-3]+'rei' # make sure file ends in REI (issues with first file)
+        rei_all = open(os.path.join(d_folder, bin_name, use_which), "r").readlines()
+
     else: rei_all = open(use_which+'.rei', "r").readlines() # grab whatever the string tells you to get
     
     print('use_which = ' + use_which)
@@ -788,9 +780,9 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
 
     for i in range(len(features_new)): 
 
-        feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + 
-                       '00000  0.10000E-28   0.00000  5000.0000000  0.0000  0.0000000  0.00000000   18.0106\n',
-                       '   0.30000  0.0000  0.0000000  0.00000000    0.00000    0.00000    0.00000\n',
+        feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                       '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                       '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.00000\n',
                        '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
                        '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
 
@@ -802,6 +794,20 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
     open(os.path.join(d_folder, bin_name + '.inp'), 'w').writelines(rei_all)
 
     return 
+#%%
+def shrink_feature(df_shrink, cutoff_s296, T): 
+
+    df_sw = pd.DataFrame()
+
+    for T_i in sorted(set(T)):
+        
+        cutoff_strength_atT = strength_T(T_i, df_shrink.elower, df_shrink.nu) * cutoff_s296
+        cutoff_strength = 10**(2*np.log10(cutoff_s296) - np.log10(cutoff_strength_atT)) # reflect across S296
+       
+        df_sw['sw_'+str(T_i)] = 10 * cutoff_strength * T_i / 296 # ratio of strength and cuttoff and ideal gas estimate for # molecules (at fixed P and V)
+
+    return df_sw.values.min(axis=1)
+
 #%%
 def bin_ASC(d_load, base_name, d_save, bins, bin_name):
     r'''
@@ -829,7 +835,7 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
     r'''
     Overview: 
         A more complicated version of bin_asc that can identify asc files needed and create fancy inp files
-        where a single measurement has been broken up into multiple ASC's.
+        where a single measurement has been broken up into multiple ASC's (esp. for a low-transmission cutoff)
         Will also work when measurement not broken into multiple ASC (but I'm still keeping the other function due to it's readability)
     Returns: 
         
@@ -845,11 +851,11 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
     inp_all[0] = '    ' + bin_start + '   ' + bin_stop + inp_all[0][25:]  # update the range
     wvn_spacing = float(inp_all[lines_main_header+1].split()[0]) # data point spacing (look for 0.0068)
     
-    f = open(d_cutoff_locations + '.pckl', 'rb')
+    f = open(d_cutoff_locations, 'rb')
     cutoff_locations = pickle.load(f)
     f.close() 
 
-    for meas_keys in reversed(d_conditions):  # keeps things in reverse order so indexing doesn't change for unprocessed files
+    for meas_keys in reversed(d_conditions):  # keeps things in reverse order so indexing doesn't change for unprocessed files (working up from bottom)
         index_meas_file = (d_conditions.index(meas_keys))*lines_per_asc + lines_main_header # where is the .asc line?
 
         if len(cutoff_locations[meas_keys]) == 1: # if the measurement file is never broken into parts
@@ -859,7 +865,8 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
         else: # we need to choose which subfiles to use, possibly mutiple of them
 
             asc_limits = np.array(cutoff_locations[meas_keys])[:,1:3].astype(float) # all wvn bounds in this file
-
+            
+            # if you're getting an error here and are working with the edge bins, you need to make sure their boundaries are within the ASC limits
             asc_start = np.where((asc_limits[:,0] < bins[bin_name][1]) & (asc_limits[:,1] > bins[bin_name][1]))[0][0] # which asc file has the starting wavenumber?
             asc_stop = np.where((asc_limits[:,0] < bins[bin_name][2]) & (asc_limits[:,1] > bins[bin_name][2]))[0][0] # which asc file has the ending wavenumber?
         
@@ -969,6 +976,8 @@ def nself_quantumJpp(d_load, base_name):
     Overview: 
         change values for n_gamma_self as a function of quantum number J"
         could be updated to change any value as a function of another
+        
+        currently, this value is not in HITRAN but is set to 0.75 by labfit
     Returns: 
         None
     Inputs:
@@ -981,23 +990,31 @@ def nself_quantumJpp(d_load, base_name):
     
     features_total = int(len(inp_all[lines_until_features:])/lines_per_feature)
     if int(inp_all[0].split()[3]) != features_total: please = stop # you missed something (both methods should both tell you how many features there are)
-
-    nJpp = np.asarray([.93,.85,.79,.78,.72,.7,.64,.65,.63,.56,.55,.54,.52,.5,.48,.46,.44,.42,.40,.38,.36,.34,.32,.3,.29]) # avgs from Paul, extrapolated for high temperature features
-
+    
+    # avgs from Paul, extrapolated for high temperature features (compiled by nathan malarich)
+    # nJpp = np.asarray([.93,.85,.79,.78,.72,.7,.64,.65,.63,.56,.55,.54,.52,.5,.48,.46,.44,.42,.40,.38,.36,.34,.32,.3,.29]) 
+    # this data was curve fit using the equation n_self = 0.887 exp(-0.0455 J") with an R2 of 0.992
 
     for i in range(features_total):
-
-        inp_index = lines_until_features+i*lines_per_feature # locate the feature
         
-        # q0offset needs to be included here to help streamline handling of leading 0's on quantum numbers. 
-        Jpp = int(inp_all[inp_index+3].replace('-',' -').split()[9]) # snag the J" quantum number (should be the 7th / 12 values, with 2 leading 0's and some //) watch out for spaceless negatives like -2-2-2
-        n = ('%.4f' % nJpp[Jpp]).rjust(8) # give a little space between neighbor
-        
-        inp_all[inp_index+1] = inp_all[inp_index+1][0:12] + n + inp_all[inp_index+1][18:]  # replace the self width with the new value f(J")
+        if i < feature_new: 
+            
+            inp_index = lines_until_features+i*lines_per_feature # locate the feature
+            
+            # q0offset needs to be included here to help streamline handling of leading 0's on quantum numbers. 
+            Jpp = int(inp_all[inp_index+3].replace('-',' -').split()[-3]) # snag the J" quantum number (should be the third to last value J", Ka", Kc")
+            
+            if i < 10: 
+                print('                                                       {}'.format(Jpp))
+                print(inp_all[inp_index+3])
+            
+            nJpp = 0.886955 * np.exp(-0.045500 * Jpp)
+            n = ('%.4f' % nJpp).rjust(8) # give a little space between neighbor
+            
+            inp_all[inp_index+1] = inp_all[inp_index+1][0:12] + n + inp_all[inp_index+1][18:]  # replace the self width with the new value f(J")
 
     # os.mkdir(d_save) # use this if you need to make a new folder for saving your files
-    open(os.path.join(d_load,base_name) + 'J.inp', 'w').writelines(inp_all)
-        
+    open(os.path.join(d_load,base_name) + 'n.inp', 'w').writelines(inp_all)
         
     return
 #%%

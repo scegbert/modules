@@ -265,7 +265,7 @@ def labfit_to_df(file_name, label_extension = '', htp = False):
                   'n_air','uc_n_air','gamma_self','uc_gamma_self',
                   'n_self','uc_n_self','delta_air','uc_delta_air',
                   'n_delta_air','uc_n_delta_air','delta_self','uc_delta_self',
-                  'n_delta_self','uc_n_d_self',
+                  'n_delta_self','uc_n_delta_self',
                   'beta_g_self','uc_beta_g_self','y_self','uc_y_self',
                   'SD_air','uc_SD_air', 'sd_self','uc_sd_s',
                   'nu_vc_f','uc_nu_vc_f','nu_vc_s','uc_nu_vc_s', # I'm not 100% sure of the 10 params after n_delta_self
