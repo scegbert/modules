@@ -215,12 +215,14 @@ def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=
     
     df_all = df_new.join(df_old, how='inner', rsuffix='_old') # join dataframes, add suffix _old to old data
     df_all.insert(7, 'uc_sw_perc', df_all['uc_sw'] / df_all['sw'])
-        
+    df_all.uc_sw_perc.mask(df_all.uc_sw < 0, -1, inplace=True)
+    
     if props_which is not False: 
         if df_props_old is None: 
             
             df_props_old = df_old.copy() # if you dont give it a df, it will use the one it loaded
             df_props_old.insert(7, 'uc_sw_perc', df_props_old['uc_sw'] / df_props_old['sw'])
+            df_props_old.uc_sw_perc.mask(df_props_old.uc_sw < 0, -1, inplace=True)
             
         for prop_compare in props_which: 
             
@@ -237,7 +239,9 @@ def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=
             df_compare[prop_compare + '_old'] = df_props_old[prop_compare]
             df_compare[prop_compare+'_delta'] = df_all[prop_compare] - df_props_old[prop_compare] 
             
-            if prop_compare == 'sw': df_compare[prop_compare+'_delta_perc'] = (df_all[prop_compare] - df_props_old[prop_compare]) / df_props_old[prop_compare]
+            if prop_compare == 'sw': 
+            
+                df_compare[prop_compare+'_delta_perc'] = (df_all[prop_compare] - df_props_old[prop_compare]) / df_props_old[prop_compare]
             
             df_compare['uc_'+prop_compare] = df_all['uc_'+prop_compare]
             df_compare['uc_'+prop_compare + '_old'] = df_props_old['uc_'+prop_compare]
@@ -462,12 +466,12 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
         if prop is not False:
             plt.plot(df[df['uc_'+prop[0]] > -1].nu, 
                      df[df['uc_'+prop[0]] > -1].ratio_max+100, 
-                         'mx', markersize=15, label='floated '+prop[1]) # overlay floated features
+                         'mx', markersize=25, label='floated '+prop[1]) # overlay floated features
             
         if prop2 is not False:
             plt.plot(df[df['uc_'+prop2[0]] > -1].nu, 
                      df[df['uc_'+prop2[0]] > -1].ratio_max+100, 
-                         'c1', markersize=20, label='floated '+prop2[1]) # overlay floated features
+                         'c1', markersize=30, label='floated '+prop2[1]) # overlay floated features
         
         if features is not False:
             plt.plot(df[df.index.isin(features)].nu, df[df.index.isin(features)].ratio_max+100, 'y3', markersize=15, label='verify') # overlay other features
@@ -543,12 +547,15 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
     Returns: 
         
     Inputs:
+        d_folder_input = where to get the file you want to save
+        
         
     r'''   
     
     if d_folder_input is None: d_folder_input = d_folder_output
     
     d_input = os.path.join(d_folder_input, bin_name)
+    d_output = os.path.join(d_folder_output, bin_name)
 
     if d_og is False: 
 
@@ -562,24 +569,24 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
     
     else: 
         
-        if not os.path.exists(d_input): # make a new folder if needed
-            os.makedirs(d_input)
+        if not os.path.exists(d_output): # make a new folder if needed
+            os.makedirs(d_output)
         
         d_file = r'\{}-000-og'.format(bin_name)
         
-        shutil.copy2(d_input + '.sho', d_input + d_file + '.sho') # save a copy of all files as og files
-        shutil.copy2(d_input + '.rei', d_input + d_file + '.rei') 
-        shutil.copy2(d_input + '.plt', d_input + d_file + '.plt') 
-        shutil.copy2(d_input + '.lwa', d_input + d_file + '.lwa') 
-        shutil.copy2(d_input + '.inp', d_input + d_file + '.inp') 
-        shutil.copy2(d_input + '.dtl', d_input + d_file + '.dtl') 
+        shutil.copy2(d_input + '.sho', d_output + d_file + '.sho') # save a copy of all files as og files
+        shutil.copy2(d_input + '.rei', d_output + d_file + '.rei') 
+        shutil.copy2(d_input + '.plt', d_output + d_file + '.plt') 
+        shutil.copy2(d_input + '.lwa', d_output + d_file + '.lwa') 
+        shutil.copy2(d_input + '.inp', d_output + d_file + '.inp') 
+        shutil.copy2(d_input + '.dtl', d_output + d_file + '.dtl') 
    
         print('file saved as: ' + d_file)
     
     return
     
 #%% 
-def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', features_constrain=[], nudge_sd = False):
+def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', features_constrain=[], nudge_sd = False, d_folder_input=None):
     r'''
     Overview: 
         float given feature for given feature (features can be list, prop needs to be single value)
@@ -592,17 +599,21 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
         features_constrain = groupings of features to constrain [[1,2], [4,5], etc.] prop_feat1 = prop_feat2, prop_feat4 = prop_feat5, etc.
         nudge_sd = SD does best when bumped off of 0 (we expect a value of 0.1, so that's where we put it)
             watch out, sometimes SD floats back to 0 after iterating a few times
+        d_folder_input = which folder we want to get the saved REI from
+            
     r'''
     
     if prop == False: prop = notgiven # prop is False (pick a feature to float)
     
     d_file = os.path.join(d_folder, bin_name)
     
+    if d_folder_input is None: d_folder_input = d_folder
+    
     if use_which == 'rei_new': rei_all = open(d_file+'.rei', "r").readlines() # newest REI file (being used by labfit)
     elif use_which == 'inp_new': rei_all = open(d_file+'.inp', "r").readlines() # newest INP file (being used by labfit)
     elif use_which == 'rei_saved': # revert to most recent saved REI file
     
-        [_, use_which] = newest_rei(os.path.join(d_folder, bin_name), bin_name)
+        [_, use_which] = newest_rei(os.path.join(d_folder_input, bin_name), bin_name)
         rei_all = open(os.path.join(d_folder, bin_name, use_which), "r").readlines()
     
     else: rei_all = open(use_which+'.rei', "r").readlines() # grab whatever the string tells you to get
@@ -746,7 +757,7 @@ def floated_line_moved(line, i, rei_all, lines_per_feature):
     return line
     
 #%%
-def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
+def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder_input=None):
     r'''
     Overview: 
         add a new feature to the INP file, currently numbers that feature starting at 1,XX0,001 with the bin number as XX
@@ -765,10 +776,12 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
     if use_which == 'rei_new': rei_all = open(d_file+'.rei', "r").readlines() # newest REI file (being used by labfit)
     elif use_which == 'inp_new': rei_all = open(d_file+'.inp', "r").readlines() # newest INP file (being used by labfit)
     elif use_which == 'rei_saved': # revert to most recent saved REI file
-    
-        num_file = int(os.listdir(os.path.join(d_folder, bin_name))[-1][3:6]) # find the file with the highest number in the "save" folder  
-        use_which = os.listdir(os.path.join(d_folder, bin_name))[-1][:-3]+'rei' # make sure file ends in REI (issues with first file)
-        rei_all = open(os.path.join(d_folder, bin_name, use_which), "r").readlines()
+
+        if d_folder_input is None: d_folder_input = d_folder
+        
+        num_file = int(os.listdir(os.path.join(d_folder_input, bin_name))[-1][3:6]) # find the file with the highest number in the "save" folder  
+        use_which = os.listdir(os.path.join(d_folder_input, bin_name))[-1][:-3]+'rei' # make sure file ends in REI (issues with first file)
+        rei_all = open(os.path.join(d_folder_input, bin_name, use_which), "r").readlines()
 
     else: rei_all = open(use_which+'.rei', "r").readlines() # grab whatever the string tells you to get
     
@@ -782,7 +795,7 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new'):
 
         feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
                        '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
-                       '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.00000\n',
+                       '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.10000\n',
                        '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
                        '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
 
@@ -915,7 +928,7 @@ def run_labfit(d_labfit, bin_name, use_rei = False):
     
     if use_rei: 
         result = os.system('copy '+bin_name+'.rei '+bin_name+'.inp') # copy file (success returns 0)
-        if result != 0: print('run_labfit wasnt able to run REI file (failed to copy)')
+        if result != 0: print('\n\nrun_labfit wasnt able to run REI file (failed to copy)\n\n')
     
     outdat = open('OUTDAT.TXT', "r").readlines()
     

@@ -284,9 +284,9 @@ def labfit_to_df(file_name, label_extension = '', htp = False):
     has_finished = False
     cur_line = len(dtl_lines)
     while has_finished is False:
-        cur_line -= 1
+        cur_line -= 1 # working up from the bottom
         line = dtl_lines[cur_line]
-        if len(line) > 200: # this is final linelist in detail file
+        if len(line) > 200: # this is final linelist in detail file (fit information is ~400 characters long)
             linelist.append(np.asfarray(line[95:].split()))
             found_list = True
             other_params = line[:18].split()
