@@ -559,11 +559,14 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
 
     if d_og is False: 
 
-        [num_file, _] = newest_rei(os.path.join(d_folder_input, bin_name), bin_name)
+        [num_file, _] = newest_rei(d_output, bin_name)
 
         d_output = os.path.join(d_folder_output, bin_name, bin_name + '-' + str(num_file+1).zfill(3) + '-' + d_save_name) # avoid over writing existing files by adding 1 to file name
            
-        shutil.copy2(d_input + '.rei', d_output + '.rei') # save a copy of the REI file
+        shutil.copy2(d_input + '.rei', d_output + '.rei') # save a copy of the REI file (with final results
+        shutil.copy2(d_input + '.lwa', d_output + '.lwa') # save a copy of the LWA file (for transission and residual info)
+        shutil.copy2(d_input + '.dtl', d_output + '.dtl') # save a copy of the DTL file (for pandas df of uncertainties)
+        shutil.copy2(d_input + '.inp', d_output + '.inp') # save a copy of the INP file (to run again if needed)
         
         print('file saved as: ' + bin_name + '-' + str(num_file+1).zfill(3) + '-' + d_save_name)
     
@@ -614,7 +617,7 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
     elif use_which == 'rei_saved': # revert to most recent saved REI file
     
         [_, use_which] = newest_rei(os.path.join(d_folder_input, bin_name), bin_name)
-        rei_all = open(os.path.join(d_folder, bin_name, use_which), "r").readlines()
+        rei_all = open(os.path.join(d_folder_input, bin_name, use_which), "r").readlines()
     
     else: rei_all = open(use_which+'.rei', "r").readlines() # grab whatever the string tells you to get
     
@@ -634,7 +637,7 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
         if prop[0]=='sd_self' and nudge_sd: 
             
             rei_all[line-1] = rei_all[line-1][0:-6] + '1' + rei_all[line-1][-5:] # change speed dependence from 0 to  0.10000 (recommendation of Brian)
-            # rei_all[line-1] = rei_all[line-1][0:-2] + '1' + rei_all[line-1][-1] # change speed dependence from 0 to 0.00001 (not enough)
+            
     if prop[0]=='sd_self' and nudge_sd: print('Speed dependence was nudged') # only print 1 time
     
     notfloated = []
@@ -705,7 +708,7 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
         rei_all[1] = rei_all[1][:26]+ str(aux_total).rjust(7) + str(constraint_total).rjust(7) + rei_all[1][40:] # update number of aux and constraints at top of file
     
     if len(notfloated) > 0: 
-        print('\n\n     you forget to float features that you are constraining\n')
+        print('\n\n     you forgot to float features that you are constraining\n')
         print(notfloated)
         print('\n')
         please = stophere # add this feature to your floated list and try again
@@ -755,8 +758,48 @@ def floated_line_moved(line, i, rei_all, lines_per_feature):
             please = stophere # feature moved too far, lets stop and regroup
         
     return line
-    
+
 #%%
+
+def unfloat_lines(d_folder, bin_name, features_keep, features_keep_doublets, d_folder_input=None):
+    
+    d_file = os.path.join(d_folder, bin_name)
+    
+    if d_folder_input is None: d_folder_input = d_folder
+    
+    [_, use_which] = newest_rei(os.path.join(d_folder_input, bin_name), bin_name)
+    rei_latest = open(os.path.join(d_folder_input, bin_name, use_which), "r").readlines()
+    lines_until_features_latest = lines_main_header + int(rei_latest[0].split()[2]) * lines_per_asc # all of the header down to the spectra
+    
+    rei_og = open(os.path.join(d_folder_input, bin_name, bin_name + '-000-og')+'.rei', "r").readlines()
+    lines_until_features_og = lines_main_header + int(rei_og[0].split()[2]) * lines_per_asc # all of the header down to the spectra
+    
+    print('\n\n\n **********     dont forget to include doublet relationships manually     ********** ')
+
+    for i in features_keep: 
+            
+        line_latest = lines_until_features_latest + lines_per_feature*i - 2
+        if int(rei_latest[line_latest-2].split()[0]) != i: # check if the feature changed places with a neighbor (nu)
+            line_latest = floated_line_moved(line_latest, i, rei_latest, lines_per_feature)
+            
+        line_og = lines_until_features_og + lines_per_feature*i - 2
+    
+        if int(rei_og[line_og-2].split()[0]) != i: # check if the feature changed places with a neighbor (nu)
+            line_og = floated_line_moved(line_og, i, rei_og, lines_per_feature)    
+           
+        rei_og[line_og-2:line_og+1] = rei_latest[line_latest-2:line_latest+1]
+        
+        for doublet in features_keep_doublets: 
+            if i in doublet:
+                print(i)
+                print(rei_latest[line_latest])
+        
+    open(d_file + '.inp', 'w').writelines(rei_og)
+        
+    return
+
+#%%
+
 def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder_input=None):
     r'''
     Overview: 
@@ -795,7 +838,7 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder
 
         feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
                        '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
-                       '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.10000\n',
+                       '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.00000\n',
                        '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
                        '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
 
