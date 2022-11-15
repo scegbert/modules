@@ -78,7 +78,7 @@ def trim(data_in, wvn_range):
     
     return data_out
 #%%
-def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None):
+def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_external_load=False):
     r'''
     Overview:
         pull data out of labfit DTL file (fit parameters and uncertainties)
@@ -89,15 +89,19 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None):
         
     r'''
     
-    d_load = os.path.join(d_labfit, bin_name) # location of measurement file (folder)
-    wvn_range = bins[bin_name][1:3] # wavenumber range of relevant bin - trimming off any chebyshev buffer that may exist
-    
-    df_load = trim(db.labfit_to_df(d_load, htp=False), wvn_range) # open and trim old database
-    
-    if d_old is not None: 
-        df_old = trim(db.labfit_to_df(d_old, htp=False), wvn_range) # open and trim old database
-        df_load['nu_og'] = df_old.nu
+    if df_external_load is False: 
+
+        d_load = os.path.join(d_labfit, bin_name) # location of measurement file (folder)
+        wvn_range = bins[bin_name][1:3] # wavenumber range of relevant bin - trimming off any chebyshev buffer that may exist
         
+        df_load = trim(db.labfit_to_df(d_load, htp=False), wvn_range) # open and trim old database
+        
+        if d_old is not None: 
+            df_old = trim(db.labfit_to_df(d_old, htp=False), wvn_range) # open and trim old database
+            df_load['nu_og'] = df_old.nu
+     
+    else: df_load = df_external_load
+         
     if cutoff_s296 is not None: 
         cutoff_strength_atT = np.zeros((len(df_load.elower), 1))
         cutoff_strength = np.zeros((len(df_load.elower), 1))
@@ -180,17 +184,20 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None):
                      (df_load.local_iso_id == df_load.local_iso_id[i_feature])) 
                      &
                      (((df_load.Kap == df_load.Kap[i_feature]) & (df_load.Kapp == df_load.Kapp[i_feature])) | 
-                     ((df_load.Kcp == df_load.Kcp[i_feature]) & (df_load.Kcpp == df_load.Kcpp[i_feature]))))
+                     ((df_load.Kcp == df_load.Kcp[i_feature]) & (df_load.Kcpp == df_load.Kcpp[i_feature])))
+                     & 
+                     (abs(df_load.nu - df_load.nu[i_feature]) < 0.2))
         
         which_rev = ((df_load.vp == df_load.vp[i_feature]) & (df_load.vpp == df_load.vpp[i_feature]) & # reverse rotation
                      (df_load.Jpp == df_load.Jp[i_feature]) & (df_load.Jp == df_load.Jpp[i_feature]) & 
                      (df_load.Kapp == df_load.Kap[i_feature]) & (df_load.Kap == df_load.Kapp[i_feature]) & 
                      (df_load.Kcpp == df_load.Kcp[i_feature]) & (df_load.Kcp == df_load.Kcpp[i_feature]) & 
-                     (df_load.index < feature_new) & (df_load.local_iso_id == df_load.local_iso_id[i_feature])) 
+                     (df_load.index < feature_new) & (df_load.local_iso_id == df_load.local_iso_id[i_feature])
+                     & 
+                     (abs(df_load.nu - df_load.nu[i_feature]) < 0.2)) 
         
         df_load['doublets'][i_feature] = df_load[which_doub].index.tolist()
         df_load['reversed'][i_feature] = df_load[which_rev].index.tolist()
-
             
     return df_load
 #%%
@@ -425,7 +432,7 @@ def strength_T(T, elower, nu, Tref=296, molec_id = 1, iso = 1):
     
     return Qref/Q * boltzman * stimulated # S(T) = S(Tref) * Qref/Q * boltzman * stimulated 
 #%%
-def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=False, features=False, axis_labels=True):
+def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=False, features=False, axis_labels=True, all_names=True):
     r'''
     Overview:
         plots output of labfit_to_spectra grouping things by temperature (or whatever variable you feed in as T)
@@ -493,7 +500,13 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
                 
             if df.reversed.astype(bool)[j]: doub_rev_names += ' r' + str(int(df.reversed[j][0]))
                                 
-            plt.annotate(str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+            if all_names is False: 
+                if features is not False: 
+                    if j in features: 
+                        plt.annotate(str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+                
+            else: 
+                plt.annotate(str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
          
     wvn_min = min(map(min, wvn))
     wvn_max = max(map(max, wvn))
@@ -800,7 +813,7 @@ def unfloat_lines(d_folder, bin_name, features_keep, features_keep_doublets, d_f
 
 #%%
 
-def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder_input=None):
+def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder_input=None, float_elower=True):
     r'''
     Overview: 
         add a new feature to the INP file, currently numbers that feature starting at 1,XX0,001 with the bin number as XX
@@ -835,12 +848,23 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder
     lines_features_total = 4 * features_total
 
     for i in range(len(features_new)): 
+        
+        if float_elower is True: 
+            
+            feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.12300\n',
+                           '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
+                           '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
 
-        feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
-                       '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
-                       '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.00000\n',
-                       '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
-                       '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+        if float_elower is False: # don't float lower state energy for features that are too small (ie only seen at one temperature)
+            
+            feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.12300\n',
+                           '   0  0  1  1  1  1  1  1  0  1  1  1  1  1  1\n',
+                           '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+
 
         rei_all.extend(feature_new.copy())
         
@@ -1021,13 +1045,14 @@ def run_labfit(d_labfit, bin_name, use_rei = False):
                 # shortening an ASC file by one datapoint (usually one of the shorter ones, ~100 points)
     
     if os.path.isfile(bin_name+'.lwa') is False and feature_error == None: 
-        didnot = actuallyrun # there was an error and we missed it
+        print('\n\n\n     no LWA file was found \n\n\n')
+        feature_error = 'no LWA'
     
     os.chdir("..") # change directory back to where the python script lives
 
     return feature_error
 #%%
-def nself_quantumJpp(d_load, base_name):
+def nself_initilize(d_load, base_name, update_name):
     r'''
     Overview: 
         change values for n_gamma_self as a function of quantum number J"
@@ -1047,9 +1072,7 @@ def nself_quantumJpp(d_load, base_name):
     features_total = int(len(inp_all[lines_until_features:])/lines_per_feature)
     if int(inp_all[0].split()[3]) != features_total: please = stop # you missed something (both methods should both tell you how many features there are)
     
-    # avgs from Paul, extrapolated for high temperature features (compiled by nathan malarich)
-    # nJpp = np.asarray([.93,.85,.79,.78,.72,.7,.64,.65,.63,.56,.55,.54,.52,.5,.48,.46,.44,.42,.40,.38,.36,.34,.32,.3,.29]) 
-    # this data was curve fit using the equation n_self = 0.887 exp(-0.0455 J") with an R2 of 0.992
+    # values taken from initial exploriation of the pure water data by scott 11/2022
 
     for i in range(features_total):
         
@@ -1057,20 +1080,24 @@ def nself_quantumJpp(d_load, base_name):
             
             inp_index = lines_until_features+i*lines_per_feature # locate the feature
             
-            # q0offset needs to be included here to help streamline handling of leading 0's on quantum numbers. 
-            Jpp = int(inp_all[inp_index+3].replace('-',' -').split()[-3]) # snag the J" quantum number (should be the third to last value J", Ka", Kc")
+            # Jpp = int(inp_all[inp_index+3].replace('-',' -').split()[-3]) # snag the J" quantum number (should be the third to last value J", Ka", Kc")
+            gamma_self = float(inp_all[inp_index+1].split()[0])
             
             if i < 10: 
-                print('                                                       {}'.format(Jpp))
-                print(inp_all[inp_index+3])
+                print('                                                       {}'.format(gamma_self))
+                print(inp_all[inp_index+1])
             
-            nJpp = 0.886955 * np.exp(-0.045500 * Jpp)
-            n = ('%.4f' % nJpp).rjust(8) # give a little space between neighbor
+            # nJpp = 0.886955 * np.exp(-0.045500 * Jpp)
+            n_gamma = -0.20932 + 2.1923 * gamma_self
             
-            inp_all[inp_index+1] = inp_all[inp_index+1][0:12] + n + inp_all[inp_index+1][18:]  # replace the self width with the new value f(J")
+            if n_gamma < 0.2: n_gamma = 0.2
+            elif n_gamma > 0.9: n_gamma = 0.9
+            n = ('%.4f' % n_gamma).rjust(8) # give a little space between neighbor
+            
+            inp_all[inp_index+1] = inp_all[inp_index+1][0:12] + n + inp_all[inp_index+1][18:]  # replace the self width with the new value 
 
     # os.mkdir(d_save) # use this if you need to make a new folder for saving your files
-    open(os.path.join(d_load,base_name) + 'n.inp', 'w').writelines(inp_all)
+    open(os.path.join(d_load,base_name) + update_name + '.inp', 'w').writelines(inp_all)
         
     return
 #%%
@@ -1150,5 +1177,80 @@ def compile_results(d_labfit, base_name_input, base_name_output, bins, d_save = 
 
     return
 
+#%% feature sniffer (find which feature(s) is the problem)
 
+def feature_sniffer(features_test, d_labfit, bin_name, prop_which, props, prop_which2=False, prop_which3=False, 
+                    iter_sniff=5, unc_multiplier=1.2, d_labfit_main=True, float_elower=True): 
+      
+    if d_labfit_main is True: d_labfit_main = d_labfit
+    
+    features_safe_good = [] # no errors, good uncertainty
+    features_safe_bad = [] # features that don't throw errors, but have bad uncertainties even all by themselves (safe_but_bad was too long)
+
+    features_dangerous = []
+    
+    features_reject = []   
+    
+    for feature in features_test: # sniff out which feature(s) are causing you grief
+        print('\n\nfeature {}, #{} out of {}, prop_which = {}\n\n'.format(feature, features_test.index(feature)+1, len(features_test), prop_which))
+        
+        if prop_which == 'new': 
+            add_features(d_labfit, bin_name, [feature], use_which='rei_saved', d_folder_input=d_labfit_main, float_elower=float_elower) 
+
+        else: 
+            # float lines, most recent saved REI in -> INP out
+            float_lines(d_labfit, bin_name, [feature], props[prop_which], 'rei_saved', d_folder_input=d_labfit_main) 
+            # INP -> INP, testing two at once (typically nu or n_self)
+            if prop_which2 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which2], 'use_inp', []) 
+            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'use_inp', [], nudge_sd)
+        
+        feature_error = None
+        
+        try: 
+            feature_error = run_labfit(d_labfit, bin_name) # need to run one time to send INP info -> REI
+            i = 1 # start at 1 because we already ran things once
+            while feature_error is None and i < iter_sniff: # run x number of times
+                i += 1
+                print('     labfit iteration #' + str(i)) # +1 for starting at 0, +1 again for already having run it using the INP (to lock in floats)
+                feature_error = run_labfit(d_labfit, bin_name, use_rei=True) 
+                    
+            if feature_error is not None: 
+    
+                throw = thaterrorplease
+                        
+            if prop_which is not 'new': 
+                
+                # see if uncertainties are where we want them
+                [df_compare, df_props] = compare_dfs(d_labfit, d_old, bins, bin_name, props[prop_which], props_which, props[prop_which2], plots = False) # read results into python
+                for prop_i in props_which: 
+                    if prop_i == 'sw': prop_i_df = 'sw_perc' # we want to look at the fractional change
+                    else: prop_i_df = prop_i
+                    
+                    features_reject.extend(df_props[df_props['uc_'+prop_i_df] > props[prop_i][4] * unc_multiplier].index.values.tolist())
+                    
+                if feature in features_reject and feature not in features_safe_bad:
+                    print(df_props[df_props['uc_'+prop_which]> props[prop_which][4] * unc_multiplier].index.values.tolist())
+                    features_safe_bad.append(feature)
+                else:             
+                    features_safe_good.append(feature)
+
+        
+            elif prop_which == 'new': 
+            
+                [T, P, wvn, trans, res, wvn_range, cheby, zero_offset] = labfit_to_spectra(d_labfit, bins, bin_name) # <-------------------
+                df_calcs = information_df(d_labfit, bin_name, bins, cutoff_s296, T) # <-------------------
+                
+                if df_calcs[df_calcs.index == df_calcs.index.max()].uc_elower.to_numpy()[0] > 500: 
+                    features_safe_bad.append(feature)    
+                else:             
+                    features_safe_good.append(feature)
+                
+                print('separation between feature and {} = {}'.format(df_calcs.index.max(), df_calcs.loc[df_calcs.index.max()].nu - feature))
+                    
+        except: 
+            
+            feature_error = feature
+            features_dangerous.append(feature)
+    
+    return features_safe_good, features_safe_bad, features_dangerous
 
