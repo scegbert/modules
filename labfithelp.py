@@ -35,6 +35,8 @@ from hapi import partitionSum # hapi has Q(T) built into the script, with this f
 import pandas as pd
 import pickle
 
+from time import sleep, time
+
 #%% labfit specific parameters
 
 lines_main_header = 3 # number of lines at the very very top of inp and rei files
@@ -50,7 +52,7 @@ meas_P_round = 0.5 # round measurement pressure to the nearest value (0.5 groups
 
 q0offset = 0 # how many 0's come before the actual quantum number pairs (I have seen 0 and 2)
 
-feature_new = 1000000 # base number for new features
+feature_new = 1000000 # base number for new features, not actually linked in the code for now (oops)
 
 #%% 
 def trim(data_in, wvn_range):
@@ -119,6 +121,9 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
         df_load['ratio_max'] = df_ratio.values.max(axis=1)
 
         if d_old is not None: df_load['ratio_max_og'] = df_load['ratio_max'] + np.log10(df_old.sw / df_load.sw) # log(a*b) = log(a) + log(b) 
+    
+    else: df_load['ratio_max'] = 0 # check everything if no cuttoff is given
+        
     
     
     # improve organization of the quantum information 
@@ -201,12 +206,15 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
             
     return df_load
 #%%
-def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=False, prop3=False, df_props_old=None, plots=True):
+def compare_dfs(d_labfit, bins, bin_name, props_which, prop, prop2=False, prop3=False, d_old=False, plots=True):
     r'''
     Overview:
         reads in DTL file with uncertainties
         only keeps parameters that have been floated for a given property
         compares this to another DTL file of your choosing (typically the original file)
+        
+        d_old = either a filepath to an old (reference) file or a dataframe to compare against
+        
     Returns: 
         df_compare = DF where the two DTL file values are compared (side-by-side and differences) where main file prop was floated
         df_props = DF of the main file where main file prop was floated
@@ -217,35 +225,47 @@ def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=
     d_new = os.path.join(d_labfit, bin_name)
     wvn_range = bins[bin_name][1:3]
     
-    df_old = trim(db.labfit_to_df(d_old, htp=False), wvn_range) # open and trim old database
-    df_new = trim(db.labfit_to_df(d_new, htp=False), wvn_range) # open scott database
+    df_new = trim(db.labfit_to_df(d_new, htp=False), wvn_range) # open newest version of the database
     
-    df_all = df_new.join(df_old, how='inner', rsuffix='_old') # join dataframes, add suffix _old to old data
+    if d_old is not False: 
+        if type(d_old) == str: # if you gave me a file path, open that file(typically og file)
+            
+            df_props_old = trim(db.labfit_to_df(d_old, htp=False), wvn_range) # if you dont give it a df, it will use the og one
+            df_props_old.insert(7, 'uc_sw_perc_old', df_props_old['uc_sw'] / df_props_old['sw'])
+            df_props_old.uc_sw_perc_old.mask(df_props_old.uc_sw < 0, -1, inplace=True)
+            
+        elif type(d_old) == pd.core.frame.DataFrame: # if you give me an "old" dataframe, use that
+            
+            df_props_old = d_old.copy()
+                
+        df_all = df_new.join(df_props_old, how='inner', rsuffix='_old') # join dataframes, add suffix _old to old data
+    
+    else: 
+        
+        df_all = df_new.copy()
+    
     df_all.insert(7, 'uc_sw_perc', df_all['uc_sw'] / df_all['sw'])
     df_all.uc_sw_perc.mask(df_all.uc_sw < 0, -1, inplace=True)
     
-    if props_which is not False: 
-        if df_props_old is None: 
-            
-            df_props_old = df_old.copy() # if you dont give it a df, it will use the one it loaded
-            df_props_old.insert(7, 'uc_sw_perc', df_props_old['uc_sw'] / df_props_old['sw'])
-            df_props_old.uc_sw_perc.mask(df_props_old.uc_sw < 0, -1, inplace=True)
-            
-        for prop_compare in props_which: 
-            
-            if prop_compare == props_which[0]: # make the df for the first round
-                df_props = df_all[prop_compare].copy().to_frame()
-                df_compare = df_all.nu.copy().to_frame()
-            
-            else: 
-                df_props[prop_compare] = df_all[prop_compare]
-                df_compare[prop_compare] = df_all[prop_compare]
-            
-            df_props['uc_'+prop_compare] = df_all['uc_'+prop_compare]
-            
+    
+    for prop_compare in props_which: 
+        
+        if prop_compare == props_which[0]: # make the df for the first round
+            df_props = df_all[prop_compare].copy().to_frame()
+
+            if d_old is not False: df_compare = df_all.nu.copy().to_frame()
+            else: df_compare = None
+        
+        else: 
+            df_props[prop_compare] = df_all[prop_compare]
+            if d_old is not False: df_compare[prop_compare] = df_all[prop_compare]
+        
+        df_props['uc_'+prop_compare] = df_all['uc_'+prop_compare]
+        
+        if d_old is not False: 
             df_compare[prop_compare + '_old'] = df_props_old[prop_compare]
             df_compare[prop_compare+'_delta'] = df_all[prop_compare] - df_props_old[prop_compare] 
-            
+        
             if prop_compare == 'sw': 
             
                 df_compare[prop_compare+'_delta_perc'] = (df_all[prop_compare] - df_props_old[prop_compare]) / df_props_old[prop_compare]
@@ -253,32 +273,36 @@ def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=
             df_compare['uc_'+prop_compare] = df_all['uc_'+prop_compare]
             df_compare['uc_'+prop_compare + '_old'] = df_props_old['uc_'+prop_compare]
             
-            if prop_compare == 'sw':
+        if prop_compare == 'sw':
+        
+            df_props['uc_sw_perc'] = df_all['uc_sw_perc']
             
-                df_props['uc_sw_perc'] = df_all['uc_sw_perc']
+            if d_old is not False: 
                 
                 df_compare['uc_sw_perc'] = df_all['uc_sw_perc']
-                df_compare['uc_sw_perc_old'] = df_props_old['uc_sw_perc']
-    
-        if prop is not False and prop2 is False: 
-    
-            df_compare = df_compare[df_compare['uc_'+prop[0]]>-1] # features where prop[0] has changed
-            df_props = df_props[df_props['uc_'+prop[0]]>-1] # features where prop[0] has changed
-            
-        if prop2 is not False and prop3 is False: 
-        
-            print('you are looking at ' + prop[1] + ' and ' + prop2[1])
-            df_compare = df_compare[(df_compare['uc_'+prop[0]]>-1) | (df_compare['uc_'+prop2[0]]>0)] # features where prop[0] has changed
-            df_props = df_props[(df_props['uc_'+prop[0]]>-1) | (df_props['uc_'+prop2[0]]>0)] # features where prop[0] has changed
-            
-        if prop3 is not False:
-            
-            print('you are looking at ' + prop[1] + ' and ' + prop2[1] + ' and ' + prop3[1])
-            df_compare = df_compare[(df_compare['uc_'+prop[0]]>-1) | (df_compare['uc_'+prop2[0]]>-1) | (df_compare['uc_'+prop3[0]]>-1)] # features where prop[0] has changed
-            df_props = df_props[(df_props['uc_'+prop[0]]>-1) | (df_props['uc_'+prop2[0]]>-1) | (df_compare['uc_'+prop3[0]]>-1)] # features where prop[0] has changed
-        
-    else: df_props = None; df_compare = None
+                df_compare['uc_sw_perc_old'] = df_props_old['uc_sw_perc_old']
 
+    if prop is not False and prop2 is False: 
+
+        if d_old is not False: 
+            df_compare = df_compare[df_compare['uc_'+prop[0]]>-1] # features where prop[0] has changed
+        df_props = df_props[df_props['uc_'+prop[0]]>-1] # features where prop[0] has changed
+        
+    if prop2 is not False and prop3 is False: 
+    
+        print('you are looking at ' + prop[1] + ' and ' + prop2[1])
+        if d_old is not False: 
+            df_compare = df_compare[(df_compare['uc_'+prop[0]]>-1) | (df_compare['uc_'+prop2[0]]>0)] # features where prop[0] has changed
+        df_props = df_props[(df_props['uc_'+prop[0]]>-1) | (df_props['uc_'+prop2[0]]>0)] # features where prop[0] has changed
+        
+    if prop3 is not False:
+        
+        print('you are looking at ' + prop[1] + ' and ' + prop2[1] + ' and ' + prop3[1])
+        if d_old is not False: 
+            df_compare = df_compare[(df_compare['uc_'+prop[0]]>-1) | (df_compare['uc_'+prop2[0]]>-1) | (df_compare['uc_'+prop3[0]]>-1)] # features where prop[0] has changed
+        df_props = df_props[(df_props['uc_'+prop[0]]>-1) | (df_props['uc_'+prop2[0]]>-1) | (df_compare['uc_'+prop3[0]]>-1)] # features where prop[0] has changed
+    
+    
     if plots: 
         for propi in [prop, prop2, prop3]: 
             if propi is not False: 
@@ -314,8 +338,10 @@ def compare_dfs(d_labfit, d_old, bins, bin_name, prop, props_which=False, prop2=
                 plt.plot(prop_delta, prop_new, 'x')
 
                 plt.ylabel('Updated ' + propi[1])
+                
+                plt.title(bin_name)
         
-    return [df_compare, df_props]
+    return [df_props, df_compare]
 #%%
 def labfit_to_spectra(d_labfit, bins, bin_name, og = False, d_load=False):
     r'''
@@ -460,11 +486,11 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
     if df is not False: 
         if 'nu_og' in df.columns: 
             changed = (df.nu != df.nu_og) | (df.ratio_max != df.ratio_max_og)        
-            plt.plot(df[changed].nu_og, df[changed].ratio_max_og+100, 'X', markersize=3, label='orig.', color=colors[5])
+            plt.plot(df[changed].nu_og, df[changed].ratio_max_og+100, 'X', markersize=3, label='orig.', color='k')
         
             for index, value in changed.items(): 
                 if value: 
-                    plt.plot([df.loc[index].nu_og, df.loc[index].nu], [df.loc[index].ratio_max_og+100, df.loc[index].ratio_max+100], color=colors[5])
+                    plt.plot([df.loc[index].nu_og, df.loc[index].nu], [df.loc[index].ratio_max_og+100, df.loc[index].ratio_max+100], color='k')
         
         # overlay the doublets and reversals
         plt.plot(df.nu[df.doublets.astype(bool)], df[df.doublets.astype(bool)].ratio_max+100, 'g+', markersize=10, label='doublets') 
@@ -575,9 +601,10 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
         [num_file, _] = newest_rei(d_output, bin_name)
 
         d_output = os.path.join(d_folder_output, bin_name, bin_name + '-' + str(num_file+1).zfill(3) + '-' + d_save_name) # avoid over writing existing files by adding 1 to file name
-           
+        
+        # LWA first because we delete it before running labfit (if error exists, don't save)
+        shutil.copy2(d_input + '.lwa', d_output + '.lwa') # save a copy of the LWA file (for transission and residual info)       
         shutil.copy2(d_input + '.rei', d_output + '.rei') # save a copy of the REI file (with final results
-        shutil.copy2(d_input + '.lwa', d_output + '.lwa') # save a copy of the LWA file (for transission and residual info)
         shutil.copy2(d_input + '.dtl', d_output + '.dtl') # save a copy of the DTL file (for pandas df of uncertainties)
         shutil.copy2(d_input + '.inp', d_output + '.inp') # save a copy of the INP file (to run again if needed)
         
@@ -590,14 +617,14 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
         
         d_file = r'\{}-000-og'.format(bin_name)
         
+        shutil.copy2(d_input + '.lwa', d_output + d_file + '.lwa') 
         shutil.copy2(d_input + '.sho', d_output + d_file + '.sho') # save a copy of all files as og files
         shutil.copy2(d_input + '.rei', d_output + d_file + '.rei') 
         shutil.copy2(d_input + '.plt', d_output + d_file + '.plt') 
-        shutil.copy2(d_input + '.lwa', d_output + d_file + '.lwa') 
         shutil.copy2(d_input + '.inp', d_output + d_file + '.inp') 
         shutil.copy2(d_input + '.dtl', d_output + d_file + '.dtl') 
    
-        print('file saved as: ' + d_file)
+        print('\n\nfile saved as: {}\n\n'.format(d_file))
     
     return
     
@@ -813,7 +840,7 @@ def unfloat_lines(d_folder, bin_name, features_keep, features_keep_doublets, d_f
 
 #%%
 
-def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder_input=None, float_elower=True):
+def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder_input=None, new_type='big'):
     r'''
     Overview: 
         add a new feature to the INP file, currently numbers that feature starting at 1,XX0,001 with the bin number as XX
@@ -847,26 +874,61 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder
     features_total = int(rei_all[0].split()[3])
     lines_features_total = 4 * features_total
 
+
     for i in range(len(features_new)): 
         
-        if float_elower is True: 
+        feature_id = new_feature_number(bin_name, new_type, i)
+        
+        if new_type == 'big_all': 
             
-            feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
-                           '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
-                           '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.12300\n',
+            feature_add = [' ' + str(feature_id) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.50000E-29   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.20000  0.2000  0.0000000  0.00000000    0.00000    0.00000    0.12000\n',
+                           '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
+                           '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+        
+        if new_type == 'big_nsg': 
+            
+            feature_add = [' ' + str(feature_id) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.50000E-29   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.20000  0.2000  0.0000000  0.00000000    0.00000    0.00000    0.12000\n',
+                           '   0  0  1  1  1  1  1  1  0  1  1  1  1  1  1\n',
+                           '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+        
+        if new_type == 'big_ns': 
+            
+            feature_add = [' ' + str(feature_id) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.50000E-29   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.20000  0.2000  0.0000000  0.00000000    0.00000    0.00000    0.12000\n',
+                           '   0  0  1  1  1  1  1  1  1  1  1  1  1  1  1\n',
+                           '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+
+        elif new_type == 'small_all':  # don't float lower state energy for features that are too small (ie only seen at one temperature)
+            
+            feature_add = [' ' + str(feature_id) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.10000E-30   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.20000  0.2000  0.0000000  0.00000000    0.00000    0.00000    0.12000\n',
                            '   0  0  1  0  1  1  1  1  0  1  1  1  1  1  1\n',
                            '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
 
-        if float_elower is False: # don't float lower state energy for features that are too small (ie only seen at one temperature)
+        elif new_type == 'small_nsg':  # don't float lower state energy for features that are too small (ie only seen at one temperature)
             
-            feature_new = [' 1' + bin_name[1:].zfill(2) + str(i+1).zfill(4) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
-                           '00000  0.10000E-28   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
-                           '   0.30000  0.4000  0.0000000  0.00000000    0.00000    0.00000    0.12300\n',
+            feature_add = [' ' + str(feature_id) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.10000E-30   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.20000  0.2000  0.0000000  0.00000000    0.00000    0.00000    0.12000\n',
                            '   0  0  1  1  1  1  1  1  0  1  1  1  1  1  1\n',
                            '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+                           
+        elif new_type == 'small_ns':  # don't float lower state energy for features that are too small (ie only seen at one temperature)
+            
+            feature_add = [' ' + str(feature_id) + '  1 1  ' + str(features_new[i]) + # guesses at values for water (will update later)
+                           '00000  0.10000E-30   0.07000  5000.0000000  0.7000  -0.0100000  0.00000000   18.0106\n',
+                           '   0.20000  0.2000  0.0000000  0.00000000    0.00000    0.00000    0.12000\n',
+                           '   0  0  1  1  1  1  1  1  1  1  1  1  1  1  1\n',
+                           '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
+            # E" = 3000, sw 0.50000E-27
 
-
-        rei_all.extend(feature_new.copy())
+        rei_all.extend(feature_add.copy())
         
     features_total_updated = features_total + len(features_new)
     rei_all[0] = rei_all[0][:33] + str(features_total_updated) + rei_all[0][38:]
@@ -874,6 +936,19 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder
     open(os.path.join(d_folder, bin_name + '.inp'), 'w').writelines(rei_all)
 
     return 
+#%%
+def new_feature_number(bin_name, new_type, i): 
+    
+    feature_id = feature_new + int(bin_name[1:]) * 1e4 + i + 1
+    if new_type == 'big_all': feature_id += 0
+    elif new_type == 'big_nsg': feature_id += 100
+    elif new_type == 'big_ns': feature_id += 200
+    elif new_type == 'small_all': feature_id += 1000
+    elif new_type == 'small_nsg': feature_id += 1100
+    elif new_type == 'small_ns': feature_id += 1200  
+    else: throw_an =error # you are trying to make a new kind of new feature. stop it. 
+
+    return feature_id
 #%%
 def shrink_feature(df_shrink, cutoff_s296, T): 
 
@@ -923,6 +998,13 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
         
     r'''
     
+    cheby_min = 2 # min cheby coeffs for small regions (const. + slope)
+    width_at_min = 1 # 4 cm-1 and less = cheby_min
+
+    cheby_max = 7 # most cheby coeffs we want to use
+    width_at_max = 14 # 10 cm-1 and more = cheby_max
+    
+   
     bin_start = '%.4f' % (bins[bin_name][1] + bins[bin_name][0])
     bin_stop = '%.4f' % (bins[bin_name][2] + bins[bin_name][3])
 
@@ -936,6 +1018,9 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
     f.close() 
 
     for meas_keys in reversed(d_conditions):  # keeps things in reverse order so indexing doesn't change for unprocessed files (working up from bottom)
+
+        print(meas_keys)
+        
         index_meas_file = (d_conditions.index(meas_keys))*lines_per_asc + lines_main_header # where is the .asc line?
 
         if len(cutoff_locations[meas_keys]) == 1: # if the measurement file is never broken into parts
@@ -944,22 +1029,26 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
         
         else: # we need to choose which subfiles to use, possibly mutiple of them
 
-            asc_limits = np.array(cutoff_locations[meas_keys])[:,1:3].astype(float) # all wvn bounds in this file
+            asc_limits = np.array(cutoff_locations[meas_keys])[:,1:3].astype(float) # all wvn bounds for this measurement file
             
             # if you're getting an error here and are working with the edge bins, you need to make sure their boundaries are within the ASC limits
             asc_start = np.where((asc_limits[:,0] < bins[bin_name][1]) & (asc_limits[:,1] > bins[bin_name][1]))[0][0] # which asc file has the starting wavenumber?
             asc_stop = np.where((asc_limits[:,0] < bins[bin_name][2]) & (asc_limits[:,1] > bins[bin_name][2]))[0][0] # which asc file has the ending wavenumber?
-        
+                        
             inp_all[index_meas_file] = cutoff_locations[meas_keys][asc_start][0] + '\n' # insert the first (maybe only) updated name in that location
+                        
+            width = min([cutoff_locations[meas_keys][asc_start][2] - bins[bin_name][1], # either from start of bin to end of first asc
+                         bins[bin_name][2] - bins[bin_name][1]])   # or the width of the whole bin
             
-            if asc_limits[asc_start][1] - asc_limits[asc_start][0] < wvn_spacing*200:
-                print(cutoff_locations[meas_keys][asc_start][0] + '     ' + str(asc_limits[asc_start][1] - asc_limits[asc_start][0]))
-                
+            cheby_num = (cheby_max - cheby_min) / (width_at_max - width_at_min) * (width - width_at_min) + cheby_min
+            cheby_num_int = 7 - int(max([min([cheby_num, cheby_max]), cheby_min]))
+            cheby_floats_og = inp_all[index_meas_file + 6]
+            inp_all[index_meas_file + 6] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby            
+            
+            print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_keys][asc_start][0], np.round(width), 7-cheby_num_int))
+
             for asc_iter in range(asc_start+1,asc_stop+1): # there is a bin break in the middle of this file. let's add a few instances of the asc input and save it
-                    
-                if asc_limits[asc_iter][1] - asc_limits[asc_iter][0] < wvn_spacing*200:
-                    print(cutoff_locations[meas_keys][asc_iter][0] + '     ' + str(asc_limits[asc_iter][1] - asc_limits[asc_iter][0]))
-                    
+                                     
                 if asc_iter == asc_start+1: # for the first iteration
                     inp_meas = inp_all[index_meas_file+1:index_meas_file+lines_per_asc] # snag the entire segment of .inp dedicated to this .asc (except file part)
                     inp_below_asc = inp_all[index_meas_file+lines_per_asc:] # snag all lines below this segment (will append later)
@@ -968,9 +1057,18 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
                     
                 num_asc += 1 # add one asc file every time we loop, we'll put this into the final inp file
                 
+                width = min([cutoff_locations[meas_keys][asc_iter][2] - cutoff_locations[meas_keys][asc_iter][1], # either width of the asc file 
+                             bins[bin_name][2] - cutoff_locations[meas_keys][asc_iter][1]])   # or from start of asc file to the end of the bin
+                
+                cheby_num = (cheby_max - cheby_min) / (width_at_max - width_at_min) * (width - width_at_min) + cheby_min
+                cheby_num_int = 7 - int(max([min([cheby_num, cheby_max]), cheby_min]))
+                inp_meas[5] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby    
+
+                print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_keys][asc_iter][0], np.round(width), 7-cheby_num_int))
+                
                 inp_all.append(cutoff_locations[meas_keys][asc_iter][0] + '\n') # insert the asc name
                 inp_all.extend(inp_meas) # add all of the asc measurement conditions information for that file
-               
+                               
                 if asc_iter == asc_stop: 
                     inp_all.extend(inp_below_asc) # add back everything that was below the asc file we were working on
                     inp_all[0] = inp_all[0][0:27] + str(num_asc).rjust(3) + inp_all[0][30:]
@@ -978,7 +1076,7 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
     open(os.path.join(d_save,bin_name) + '.inp', 'w').writelines(inp_all)
 
     return
-    
+
 #%%
 def run_labfit(d_labfit, bin_name, use_rei = False):
     r'''
@@ -1179,8 +1277,8 @@ def compile_results(d_labfit, base_name_input, base_name_output, bins, d_save = 
 
 #%% feature sniffer (find which feature(s) is the problem)
 
-def feature_sniffer(features_test, d_labfit, bin_name, prop_which, props, prop_which2=False, prop_which3=False, 
-                    iter_sniff=5, unc_multiplier=1.2, d_labfit_main=True, float_elower=True): 
+def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, props_which, prop_which2=False, prop_which3=False, 
+                    iter_sniff=5, unc_multiplier=1, d_labfit_main=True, new_type=False): 
       
     if d_labfit_main is True: d_labfit_main = d_labfit
     
@@ -1188,69 +1286,86 @@ def feature_sniffer(features_test, d_labfit, bin_name, prop_which, props, prop_w
     features_safe_bad = [] # features that don't throw errors, but have bad uncertainties even all by themselves (safe_but_bad was too long)
 
     features_dangerous = []
-    
-    features_reject = []   
+        
+    features_dict = {}
     
     for feature in features_test: # sniff out which feature(s) are causing you grief
-        print('\n\nfeature {}, #{} out of {}, prop_which = {}\n\n'.format(feature, features_test.index(feature)+1, len(features_test), prop_which))
+        print('\nfeature {}, #{} out of {}, prop_which = {}, new_type = {}'.format(feature, features_test.index(feature)+1, len(features_test), prop_which, new_type))
         
-        if prop_which == 'new': 
-            add_features(d_labfit, bin_name, [feature], use_which='rei_saved', d_folder_input=d_labfit_main, float_elower=float_elower) 
+        if new_type is not False: 
+            add_features(d_labfit, bin_name, [feature], use_which='rei_saved', d_folder_input=d_labfit_main, new_type=new_type) 
 
         else: 
             # float lines, most recent saved REI in -> INP out
             float_lines(d_labfit, bin_name, [feature], props[prop_which], 'rei_saved', d_folder_input=d_labfit_main) 
             # INP -> INP, testing two at once (typically nu or n_self)
             if prop_which2 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which2], 'use_inp', []) 
-            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'use_inp', [], nudge_sd)
+            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'use_inp', [])
         
         feature_error = None
-        
-        try: 
+        features_reject = [] # reset with each iteration
+
+        try:  # be very careful when editing - any error will trigger the except (even if the feature is fine)
+            
             feature_error = run_labfit(d_labfit, bin_name) # need to run one time to send INP info -> REI
+            [df_props, _] = compare_dfs(d_labfit, bins, bin_name, props_which, props[prop_which], plots=False) # read results into python
+            features_dict[feature] = df_props.copy()
+            
             i = 1 # start at 1 because we already ran things once
-            while feature_error is None and i < iter_sniff: # run x number of times
+            while i < iter_sniff: # run x number of times
                 i += 1
                 print('     labfit iteration #' + str(i)) # +1 for starting at 0, +1 again for already having run it using the INP (to lock in floats)
                 feature_error = run_labfit(d_labfit, bin_name, use_rei=True) 
-                    
-            if feature_error is not None: 
-    
-                throw = thaterrorplease
+                [df_props, _] = compare_dfs(d_labfit, bins, bin_name, props_which, props[prop_which], plots=False) # read results into python            
+                features_dict[feature] = pd.concat([features_dict[feature], df_props])
+                
+                if feature_error is not None: 
+                    throw = thaterrorplease
                         
-            if prop_which is not 'new': 
-                
-                # see if uncertainties are where we want them
-                [df_compare, df_props] = compare_dfs(d_labfit, d_old, bins, bin_name, props[prop_which], props_which, props[prop_which2], plots = False) # read results into python
-                for prop_i in props_which: 
-                    if prop_i == 'sw': prop_i_df = 'sw_perc' # we want to look at the fractional change
-                    else: prop_i_df = prop_i
+                else: 
                     
-                    features_reject.extend(df_props[df_props['uc_'+prop_i_df] > props[prop_i][4] * unc_multiplier].index.values.tolist())
-                    
-                if feature in features_reject and feature not in features_safe_bad:
-                    print(df_props[df_props['uc_'+prop_which]> props[prop_which][4] * unc_multiplier].index.values.tolist())
-                    features_safe_bad.append(feature)
-                else:             
-                    features_safe_good.append(feature)
-
+                    if i > iter_sniff//2:  # start checking halfway through so we get a couple chances
+                        # start checking uncertainty after the second iteration (it bounces around sometimes)                                        
+                        for prop_i in props_which: 
+                            if prop_i == 'sw': prop_i_df = 'sw_perc' # we want to look at the fractional change
+                            else: prop_i_df = prop_i
+                                                    
+                            features_reject.extend(df_props[df_props['uc_'+prop_i_df] > props[prop_i][4] * unc_multiplier].index.values.tolist())
+                            
+                        features_reject.extend(df_props[df_props['gamma_self'] < 0.01].index.values.tolist()) # ditch features where gamma is going to 0
         
-            elif prop_which == 'new': 
+            if new_type is not False: feature_id = new_feature_number(bin_name, new_type, 0) # assumes we're always looking at feature #1 (one-by-one)
+            else: feature_id = feature
+              
+            if feature_id in features_reject and feature not in features_safe_bad:
+                features_safe_bad.append(feature)
             
-                [T, P, wvn, trans, res, wvn_range, cheby, zero_offset] = labfit_to_spectra(d_labfit, bins, bin_name) # <-------------------
-                df_calcs = information_df(d_labfit, bin_name, bins, cutoff_s296, T) # <-------------------
+            else:             
+                features_safe_good.append(feature)
                 
-                if df_calcs[df_calcs.index == df_calcs.index.max()].uc_elower.to_numpy()[0] > 500: 
-                    features_safe_bad.append(feature)    
-                else:             
-                    features_safe_good.append(feature)
-                
-                print('separation between feature and {} = {}'.format(df_calcs.index.max(), df_calcs.loc[df_calcs.index.max()].nu - feature))
-                    
-        except: 
-            
+        except:     
+
             feature_error = feature
             features_dangerous.append(feature)
-    
-    return features_safe_good, features_safe_bad, features_dangerous
 
+
+                
+                
+    return features_safe_good, features_safe_bad, features_dangerous, features_dict
+
+def wait_for_kernal(d_labfit, minutes=2): 
+
+    time_since_update = time() - os.path.getmtime(d_labfit + r'/outdat.txt')
+    print('checked')
+    print('   {} seconds since outdat was updated'.format(int(time_since_update)))
+    
+    # average run time for these bins = 20 seconds, large allowance given for other calculations
+    while time_since_update < 60*minutes: # wait for the kernal to go unused for 5 minutes
+        
+        sleep(60*minutes) # wait a minute and check again
+        
+        time_since_update = time() - os.path.getmtime(d_labfit + r'/outdat.txt')
+        print('checked')
+        print('   {} seconds since outdat was updated'.format(int(time_since_update))) # TODO - print the current time (hour is plenty and minute)
+    
+    return
