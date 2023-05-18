@@ -73,10 +73,19 @@ def trim(data_in, wvn_range):
     
     except: 
         
-        istart = np.argmin(abs(data_in[0,:] - wvn_range[0])) # won't work if you didn't put wvn in the first position
-        istop = np.argmin(abs(data_in[0,:] - wvn_range[1]))
-    
-        data_out = data_in[:,istart:istop+1] # +1 to get the feature on the edge
+        try: 
+            
+            istart = np.argmin(abs(data_in[0,:] - wvn_range[0])) # won't work if you didn't put wvn in the first position
+            istop = np.argmin(abs(data_in[0,:] - wvn_range[1]))
+
+            data_out = data_in[:,istart:istop+1] # +1 to get the feature on the edge
+
+        except: 
+        
+            istart = np.argmin(abs(data_in - wvn_range[0])) # won't work if you didn't put wvn in the first position
+            istop = np.argmin(abs(data_in - wvn_range[1]))
+
+            data_out = data_in[istart:istop+1] # +1 to get the feature on the edge
     
     return data_out
 #%%
@@ -113,19 +122,21 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
         for T_i in sorted(set(T)):
             
             cutoff_strength_atT = strength_T(T_i, df_load.elower, df_load.nu) * cutoff_s296
+        
             cutoff_strength = 10**(2*np.log10(cutoff_s296) - np.log10(cutoff_strength_atT)) # reflect across S296
            
             df_ratio['ratio_'+str(T_i)] = np.log10((df_load.sw / cutoff_strength) * (296 / T_i)) # ratio of strength and cuttoff and ideal gas estimate for # molecules (at fixed P and V)
-
+        
         df_load = pd.concat([df_load, df_ratio], axis=1)
         df_load['ratio_max'] = df_ratio.values.max(axis=1)
 
         if d_old is not None: df_load['ratio_max_og'] = df_load['ratio_max'] + np.log10(df_old.sw / df_load.sw) # log(a*b) = log(a) + log(b) 
     
     else: df_load['ratio_max'] = 0 # check everything if no cuttoff is given
-        
-    
-    
+            
+    return quantum_assignments(df_load)
+#%%
+def quantum_assignments(df_load): 
     # improve organization of the quantum information 
     
     quanta = df_load.quanta.str.replace('-',' -').replace('q','').str.split(expand=True) # looking for doublets (watch out for negative quanta without spaces, ie -2-2-2)
@@ -181,6 +192,8 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
     df_load['doublets'] = np.empty((len(df_load), 0)).tolist()
     df_load['reversed'] = np.empty((len(df_load), 0)).tolist()
 
+    if 'ratio_max' not in df_load: df_load['ratio_max'] = 0 # check everything if no cuttoff is given
+
     for i_feature in df_load[df_load.ratio_max>-1].index.tolist():
         
         which_doub = (((df_load.vp == df_load.vp[i_feature]) & (df_load.vpp == df_load.vpp[i_feature]) &
@@ -192,6 +205,9 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
                      ((df_load.Kcp == df_load.Kcp[i_feature]) & (df_load.Kcpp == df_load.Kcpp[i_feature])))
                      & 
                      (abs(df_load.nu - df_load.nu[i_feature]) < 0.2))
+        
+        # if you get an error like 'Can only compare identically-labeled Series objects', 
+        # you probably have two features with the same index (search for i_feature in the REI file)
         
         which_rev = ((df_load.vp == df_load.vp[i_feature]) & (df_load.vpp == df_load.vpp[i_feature]) & # reverse rotation
                      (df_load.Jpp == df_load.Jp[i_feature]) & (df_load.Jp == df_load.Jpp[i_feature]) & 
@@ -507,7 +523,7 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
                          'c1', markersize=30, label='floated '+prop2[1]) # overlay floated features
         
         if features is not False:
-            plt.plot(df[df.index.isin(features)].nu, df[df.index.isin(features)].ratio_max+100, 'y3', markersize=15, label='verify') # overlay other features
+            plt.plot(df[df.index.isin(features)].nu, df[df.index.isin(features)].ratio_max+100, 'y3', markersize=20, color='k', label='verify') # overlay other features
         
         for j in df.index:
             j = int(j)
@@ -529,10 +545,10 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
             if all_names is False: 
                 if features is not False: 
                     if j in features: 
-                        plt.annotate(str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+                        plt.annotate('  '+str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
                 
             else: 
-                plt.annotate(str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+                plt.annotate('  '+str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for non-doublets
          
     wvn_min = min(map(min, wvn))
     wvn_max = max(map(max, wvn))
@@ -616,6 +632,7 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
             os.makedirs(d_output)
         
         d_file = r'\{}-000-og'.format(bin_name)
+        # d_file = r'\{}-000-HITRAN'.format(bin_name)
         
         shutil.copy2(d_input + '.lwa', d_output + d_file + '.lwa') 
         shutil.copy2(d_input + '.sho', d_output + d_file + '.sho') # save a copy of all files as og files
@@ -874,6 +891,9 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder
     features_total = int(rei_all[0].split()[3])
     lines_features_total = 4 * features_total
 
+    rei_updated = rei_all[:lines_until_features + lines_features_total] # all lines with features
+    rei_constraints = rei_all[lines_until_features + lines_features_total:] # lines at the bottom with constraints (could be  - and probably is - nothing)
+        
 
     for i in range(len(features_new)): 
         
@@ -927,13 +947,15 @@ def add_features(d_folder, bin_name, features_new, use_which='rei_new', d_folder
                            '   0  0  1  1  1  1  1  1  1  1  1  1  1  1  1\n',
                            '//  0  0      0 0 0          0 0 0  0  0  0        0  0  0  \n']
             # E" = 3000, sw 0.50000E-27
-
-        rei_all.extend(feature_add.copy())
+        
+        rei_updated.extend(feature_add.copy())
+        
+    rei_updated.extend(rei_constraints)
         
     features_total_updated = features_total + len(features_new)
-    rei_all[0] = rei_all[0][:33] + str(features_total_updated) + rei_all[0][38:]
+    rei_updated[0] = rei_updated[0][:33] + str(features_total_updated) + rei_updated[0][38:]
     
-    open(os.path.join(d_folder, bin_name + '.inp'), 'w').writelines(rei_all)
+    open(os.path.join(d_folder, bin_name + '.inp'), 'w').writelines(rei_updated)
 
     return 
 #%%
@@ -948,7 +970,7 @@ def new_feature_number(bin_name, new_type, i):
     elif new_type == 'small_ns': feature_id += 1200  
     else: throw_an =error # you are trying to make a new kind of new feature. stop it. 
 
-    return feature_id
+    return int(feature_id)
 #%%
 def shrink_feature(df_shrink, cutoff_s296, T): 
 
@@ -986,7 +1008,7 @@ def bin_ASC(d_load, base_name, d_save, bins, bin_name):
 
     return
 
-def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations, d_conditions):
+def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations, d_conditions, ASC_sniffer=False):
     r'''
     Overview: 
         A more complicated version of bin_asc that can identify asc files needed and create fancy inp files
@@ -998,6 +1020,8 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
         
     r'''
     
+    which_ASC_files = [] # how many ASC files is this INP file using? (for help with sniffer test)
+       
     cheby_min = 2 # min cheby coeffs for small regions (const. + slope)
     width_at_min = 1 # 4 cm-1 and less = cheby_min
 
@@ -1011,74 +1035,108 @@ def bin_ASC_cutoff(d_load, base_name, d_save, bins, bin_name, d_cutoff_locations
     inp_all = open(os.path.join(d_load, base_name + '.inp'), "r").readlines()
 
     inp_all[0] = '    ' + bin_start + '   ' + bin_stop + inp_all[0][25:]  # update the range
-    wvn_spacing = float(inp_all[lines_main_header+1].split()[0]) # data point spacing (look for 0.0068)
     
     f = open(d_cutoff_locations, 'rb')
     cutoff_locations = pickle.load(f)
     f.close() 
-
-    for meas_keys in reversed(d_conditions):  # keeps things in reverse order so indexing doesn't change for unprocessed files (working up from bottom)
-
-        print(meas_keys)
+    
+    if ASC_sniffer is False or ASC_sniffer is True: 
         
-        index_meas_file = (d_conditions.index(meas_keys))*lines_per_asc + lines_main_header # where is the .asc line?
+        for meas_key in reversed(d_conditions):  # keeps things in reverse order so indexing doesn't change for unprocessed files (working up from bottom)
 
-        if len(cutoff_locations[meas_keys]) == 1: # if the measurement file is never broken into parts
-
-            inp_all[index_meas_file] = cutoff_locations[meas_keys][0][0] + '\n' # insert the updated name in that location
-        
-        else: # we need to choose which subfiles to use, possibly mutiple of them
-
-            asc_limits = np.array(cutoff_locations[meas_keys])[:,1:3].astype(float) # all wvn bounds for this measurement file
+            print(meas_key)
             
-            # if you're getting an error here and are working with the edge bins, you need to make sure their boundaries are within the ASC limits
-            asc_start = np.where((asc_limits[:,0] < bins[bin_name][1]) & (asc_limits[:,1] > bins[bin_name][1]))[0][0] # which asc file has the starting wavenumber?
-            asc_stop = np.where((asc_limits[:,0] < bins[bin_name][2]) & (asc_limits[:,1] > bins[bin_name][2]))[0][0] # which asc file has the ending wavenumber?
-                        
-            inp_all[index_meas_file] = cutoff_locations[meas_keys][asc_start][0] + '\n' # insert the first (maybe only) updated name in that location
-                        
-            width = min([cutoff_locations[meas_keys][asc_start][2] - bins[bin_name][1], # either from start of bin to end of first asc
-                         bins[bin_name][2] - bins[bin_name][1]])   # or the width of the whole bin
-            
-            cheby_num = (cheby_max - cheby_min) / (width_at_max - width_at_min) * (width - width_at_min) + cheby_min
-            cheby_num_int = 7 - int(max([min([cheby_num, cheby_max]), cheby_min]))
-            cheby_floats_og = inp_all[index_meas_file + 6]
-            inp_all[index_meas_file + 6] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby            
-            
-            print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_keys][asc_start][0], np.round(width), 7-cheby_num_int))
+            index_meas_file = (d_conditions.index(meas_key))*lines_per_asc + lines_main_header # where is the .asc line?
 
-            for asc_iter in range(asc_start+1,asc_stop+1): # there is a bin break in the middle of this file. let's add a few instances of the asc input and save it
-                                     
-                if asc_iter == asc_start+1: # for the first iteration
-                    inp_meas = inp_all[index_meas_file+1:index_meas_file+lines_per_asc] # snag the entire segment of .inp dedicated to this .asc (except file part)
-                    inp_below_asc = inp_all[index_meas_file+lines_per_asc:] # snag all lines below this segment (will append later)
-                    inp_all = inp_all[0:index_meas_file+lines_per_asc] # remove the end lines (now that we've saved them elsewhere)
-                    num_asc = int(inp_all[0].split()[2])
-                    
-                num_asc += 1 # add one asc file every time we loop, we'll put this into the final inp file
+            if len(cutoff_locations[meas_key]) == 1: # if the measurement file is never broken into parts
+
+                inp_all[index_meas_file] = cutoff_locations[meas_key][0][0] + '\n' # insert the updated name in that location
                 
-                width = min([cutoff_locations[meas_keys][asc_iter][2] - cutoff_locations[meas_keys][asc_iter][1], # either width of the asc file 
-                             bins[bin_name][2] - cutoff_locations[meas_keys][asc_iter][1]])   # or from start of asc file to the end of the bin
+            else: # we need to choose which subfiles to use, possibly mutiple of them
+                          
+                asc_limits = np.array(cutoff_locations[meas_key])[:,1:3].astype(float) # all wvn bounds for this measurement file
+                
+                # if you're getting an error here and are working with the edge bins, you need to make sure their boundaries are within the ASC limits
+                asc_start = np.where((asc_limits[:,0] < bins[bin_name][1]) & (asc_limits[:,1] > bins[bin_name][1]))[0][0] # which asc file has the starting wavenumber?
+                asc_stop = np.where((asc_limits[:,0] < bins[bin_name][2]) & (asc_limits[:,1] > bins[bin_name][2]))[0][0] # which asc file has the ending wavenumber?
+                                        
+                inp_all[index_meas_file] = cutoff_locations[meas_key][asc_start][0] + '\n' # insert the first (maybe only) updated name in that location
+                            
+                width = min([cutoff_locations[meas_key][asc_start][2] - bins[bin_name][1], # either from start of bin to end of first asc
+                             bins[bin_name][2] - bins[bin_name][1]])   # or the width of the whole bin
                 
                 cheby_num = (cheby_max - cheby_min) / (width_at_max - width_at_min) * (width - width_at_min) + cheby_min
                 cheby_num_int = 7 - int(max([min([cheby_num, cheby_max]), cheby_min]))
-                inp_meas[5] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby    
-
-                print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_keys][asc_iter][0], np.round(width), 7-cheby_num_int))
+                cheby_floats_og = inp_all[index_meas_file + 6]
+                inp_all[index_meas_file + 6] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby            
                 
-                inp_all.append(cutoff_locations[meas_keys][asc_iter][0] + '\n') # insert the asc name
-                inp_all.extend(inp_meas) # add all of the asc measurement conditions information for that file
-                               
-                if asc_iter == asc_stop: 
-                    inp_all.extend(inp_below_asc) # add back everything that was below the asc file we were working on
-                    inp_all[0] = inp_all[0][0:27] + str(num_asc).rjust(3) + inp_all[0][30:]
-       
+                print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_key][asc_start][0], np.round(width,1), 7-cheby_num_int))
+
+                if ASC_sniffer is True: which_ASC_files.append(cutoff_locations[meas_key][asc_start][0])           
+
+                for asc_iter in range(asc_start+1,asc_stop+1): # there is a bin break in the middle of this file. let's add a few instances of the asc input and save it
+               
+                    if asc_iter == asc_start+1: # for the first iteration, grab the info you need to copy
+                        inp_meas = inp_all[index_meas_file+1:index_meas_file+lines_per_asc] # snag the entire segment of .inp dedicated to this .asc (except file part)
+                        inp_below_asc = inp_all[index_meas_file+lines_per_asc:] # snag all lines below this segment (will append later)
+                        inp_all = inp_all[0:index_meas_file+lines_per_asc] # remove the end lines (now that we've saved them elsewhere)
+                        num_asc = int(inp_all[0].split()[2])
+                
+                    num_asc += 1 # add one asc file every time we loop, we'll put this into the final inp file
+                    
+                    width = min([cutoff_locations[meas_key][asc_iter][2] - cutoff_locations[meas_key][asc_iter][1], # either width of the asc file 
+                                 (bins[bin_name][2] + bins[bin_name][3]) - cutoff_locations[meas_key][asc_iter][1], # or from start of asc file to the end of the bin
+                                 cutoff_locations[meas_key][asc_iter][2] - (bins[bin_name][1] + bins[bin_name][0])]) # or from the start of the bin to the end of the ASC
+                    
+                    cheby_num = (cheby_max - cheby_min) / (width_at_max - width_at_min) * (width - width_at_min) + cheby_min
+                    cheby_num_int = 7 - int(max([min([cheby_num, cheby_max]), cheby_min]))
+                    inp_meas[5] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby    
+                    
+                    inp_all.append(cutoff_locations[meas_key][asc_iter][0] + '\n') # insert the asc name
+                    inp_all.extend(inp_meas) # add all of the asc measurement conditions information for that file
+                                                 
+                    print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_key][asc_iter][0], np.round(width,1), 7-cheby_num_int))
+
+                    if ASC_sniffer is True: which_ASC_files.append(cutoff_locations[meas_key][asc_iter][0])           
+                           
+                    if asc_iter == asc_stop: 
+                        inp_all.extend(inp_below_asc) # add back everything that was below the asc file we were working on
+                        inp_all[0] = inp_all[0][0:27] + str(num_asc).rjust(3) + inp_all[0][30:]
+    
+    else: 
+        
+        meas_key = ASC_sniffer[5:].split('.')[0].replace('_', ' ').rsplit(' ',1)[0].replace('-','_') # remove .ASC and other number info to get the measurement file name
+        
+        for i, val in enumerate(cutoff_locations[meas_key]):
+            if val[0] == ASC_sniffer: asc_iter = i
+        
+        index_meas_file = lines_main_header # where is the .asc line? (for the sniffer, there is only one at the top)
+    
+        inp_all = open(os.path.join(d_load, base_name + '_sniffer.inp'), "r").readlines()
+    
+        inp_all[0] = '    ' + bin_start + '   ' + bin_stop + inp_all[0][25:]  # update the range
+    
+        
+        inp_all[index_meas_file] = cutoff_locations[meas_key][asc_iter][0] + '\n' # insert the first (maybe only) updated name in that location
+                    
+        width = min([cutoff_locations[meas_key][asc_iter][2] - cutoff_locations[meas_key][asc_iter][1], # either width of the asc file 
+                     (bins[bin_name][2] + bins[bin_name][3]) - cutoff_locations[meas_key][asc_iter][1], # or from start of asc file to the end of the bin
+                     cutoff_locations[meas_key][asc_iter][2] - (bins[bin_name][1] + bins[bin_name][0])]) # or from the start of the bin to the end of the ASC
+        
+        cheby_num = (cheby_max - cheby_min) / (width_at_max - width_at_min) * (width - width_at_min) + cheby_min
+        cheby_num_int = 7 - int(max([min([cheby_num, cheby_max]), cheby_min]))
+        cheby_floats_og = inp_all[index_meas_file + 6]
+        inp_all[index_meas_file + 6] = cheby_floats_og[::-1].replace('0','1',cheby_num_int)[::-1] # change number of floated parameters in cheby            
+        
+        print('          {} - {} cm-1 wide ({} cheby coeffs)'.format(cutoff_locations[meas_key][asc_iter][0], np.round(width,1), 7-cheby_num_int))
+        
+        
     open(os.path.join(d_save,bin_name) + '.inp', 'w').writelines(inp_all)
 
-    return
+    return which_ASC_files
 
 #%%
-def run_labfit(d_labfit, bin_name, use_rei = False):
+def run_labfit(d_labfit, bin_name, use_rei=False, time_limit=120):
     r'''
     Overview: 
         run labfit, try to resolve common feature errors
@@ -1105,10 +1163,20 @@ def run_labfit(d_labfit, bin_name, use_rei = False):
     
     if os.path.isfile(bin_name+'.lwa'): os.remove(bin_name+'.lwa') # remove old file
     
-    sp = subprocess.Popen(['labfit.exe'], stdin=subprocess.PIPE, shell=True)
-    sp.communicate(input='\n'.encode()) # run labfit and press 'enter' if it didn't work
-    sp.stdin.close()
+    sp = subprocess.Popen(['labfit.exe'], stdin=subprocess.PIPE, shell=False)
 
+    poll_code = None # None = not done running, 0 = done running
+    i = 0
+    while poll_code == None: 
+        i+=1
+        sleep(1) # check every second
+        poll_code = sp.poll() # is the file done running? (None = no)
+
+        if time_limit == i: 
+            
+            sp.kill()
+            print('   labfit timed out after {} seconds'.format(time_limit))
+            
     dtl_all = open(bin_name+'.dtl', "r").readlines()
     
     feature_error = None # we'll check for a bad feature
@@ -1118,34 +1186,41 @@ def run_labfit(d_labfit, bin_name, use_rei = False):
                      ' This is forbidden by the constraint rules', 
                      ' Covariance matrix is not positive definite'] 
 
-    for line in dtl_all: 
-        if line.startswith(labfit_errors[0]): 
-            print(line)
-            feature_error = int(line.split()[1])
-        if line.startswith(labfit_errors[1]):
-            print(line)
-            feature_error = int(line.split()[8])
-        if line.startswith(labfit_errors[2]):
-            print(line)
-            inp_all = open(bin_name+'.inp', "r").readlines()
-            feature_error_neighbor = int(line.split()[6]) # snag the feature listed
-            for linei in range(len(inp_all)): 
-                if inp_all[linei].startswith(str(feature_error_neighbor).rjust(8)): # # when you find the right feature
-                    feature_error = int(inp_all[linei+4].split()[0]) # grab the next feature
-        if line.startswith(labfit_errors[3]):
-            print(line)
-            contraint = duplicated # you have a duplicated constraint. consider double checking who is constrained twice and which can be eliminated
-        if line.startswith(labfit_errors[4]):
-            print(line)
-            labfit = notconverging # Labfit is upset. You'll need to change something. 
-            # things that have worked in the past: 
-                # try floating lines one by one to see which errors out
-                # shortening an ASC file by one datapoint (usually one of the shorter ones, ~100 points)
     
+
+    if i >= time_limit: 
+        feature_error = 'timeout'
+                
+    else: 
+
+        for line in dtl_all:        
+            if line.startswith(labfit_errors[0]): 
+                print(line)
+                feature_error = int(line.split()[1])
+            if line.startswith(labfit_errors[1]):
+                print(line)
+                feature_error = int(line.split()[8])
+            if line.startswith(labfit_errors[2]):
+                print(line)
+                inp_all = open(bin_name+'.inp', "r").readlines()
+                feature_error_neighbor = int(line.split()[6]) # snag the feature listed
+                for linei in range(len(inp_all)): 
+                    if inp_all[linei].startswith(str(feature_error_neighbor).rjust(8)): # # when you find the right feature
+                        feature_error = int(inp_all[linei+4].split()[0]) # grab the next feature
+            if line.startswith(labfit_errors[3]):
+                print(line)
+                contraint = duplicated # you have a duplicated constraint. consider double checking who is constrained twice and which can be eliminated
+            if line.startswith(labfit_errors[4]):
+                print(line)
+                labfit = notconverging # Labfit is upset. You'll need to change something. 
+                # things that have worked in the past: 
+                    # try floating lines one by one to see which errors out
+                    # shortening an ASC file by one datapoint (usually one of the shorter ones, ~100 points)
+        
     if os.path.isfile(bin_name+'.lwa') is False and feature_error == None: 
-        print('\n\n\n     no LWA file was found \n\n\n')
-        feature_error = 'no LWA'
     
+        feature_error = 'no LWA'
+        
     os.chdir("..") # change directory back to where the python script lives
 
     return feature_error
@@ -1299,8 +1374,8 @@ def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, 
             # float lines, most recent saved REI in -> INP out
             float_lines(d_labfit, bin_name, [feature], props[prop_which], 'rei_saved', d_folder_input=d_labfit_main) 
             # INP -> INP, testing two at once (typically nu or n_self)
-            if prop_which2 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which2], 'use_inp', []) 
-            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'use_inp', [])
+            if prop_which2 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which2], 'inp_new', []) 
+            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'inp_new', [])
         
         feature_error = None
         features_reject = [] # reset with each iteration
@@ -1353,7 +1428,7 @@ def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, 
                 
     return features_safe_good, features_safe_bad, features_dangerous, features_dict
 
-def wait_for_kernal(d_labfit, minutes=2): 
+def wait_for_kernal(d_labfit, minutes=3): 
 
     time_since_update = time() - os.path.getmtime(d_labfit + r'/outdat.txt')
     print('checked')

@@ -7,11 +7,13 @@ from PyQt5.QtGui import QGuiApplication, QImage
 
 def style_sheet():
     plt.style.use({
-        "axes.titlesize": 16,
-        "figure.titlesize": 16,
-        'xtick.labelsize': 16,
-        'ytick.labelsize': 16,
-        "axes.labelsize": 16,
+        "axes.titlesize": 12,
+        "figure.titlesize": 12,
+        "legend.fontsize": 12,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        "axes.labelsize": 12,
+        
         "figure.autolayout": True,
     })
 
