@@ -139,7 +139,7 @@ def df_to_par(df, par_name, suffix = '', extra_params = {}, save_dir = None, pri
                 except KeyError:
                     value = HITRAN_DEFAULT_HEADER['default'][name]
                 # Now write the value to file, with several special cases
-                if 'molec_id' in name and not isinstance(value, np.int64): # <-- added by scott, only do this snippet when value is H2O, not when 1
+                if 'molec_id' in name and not isinstance(value, np.int64): # <-- added not isinstance by scott, only do this snippet when value is H2O, not when 1
                     value = MOLECULE_NAMES.index(value) + 1
                     out.write(HITRAN_DEFAULT_HEADER['format'][name] % value)
                 if 'local_iso_id' in name:

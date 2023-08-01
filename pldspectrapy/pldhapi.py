@@ -19,11 +19,6 @@ __ComplexType__ = complex128
 __IntegerType__ = int64
 __FloatType__ = float64
 
-
-from hapi import arange_ # added by Scott after getting weird errors (is the same as arrange with minor modification for small step sizes)
-# in the end this fix didn't work, so I changed arange_ back to arange. I"m still new. This is not a change that should be perpetuated
-
-
 ###############################################################################
 #                        Insert Modified Code Below                           #
 """
@@ -284,7 +279,7 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
                 else:
                     # PARAMETER_META doesn't have any keys for shift temperature-exponents, stuck with hardcode
                     try:
-                        n_delta = LOCAL_TABLE_CACHE[TableName]['data']['n_delta_air'][RowID]
+                        n_delta = LOCAL_TABLE_CACHE[TableName]['data']['n_delta_' + species_lower][RowID]
                     except:
                         n_delta = 1
                     Shift0 += abun*CustomEnvDependences.get(delta_name,
@@ -308,7 +303,10 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
 
             BoundIndexLower = bisect(Omegas,LineCenterDB-OmegaWingF)
             BoundIndexUpper = bisect(Omegas,LineCenterDB+OmegaWingF)
-            lineshape_vals = PROFILE_SDVOIGT(LineCenterDB,GammaD,Gamma0,Gamma2,Shift0,Shift2,Omegas[BoundIndexLower:BoundIndexUpper])[0]
+            try:
+                lineshape_vals = PROFILE_SDVOIGT(LineCenterDB,GammaD,Gamma0,Gamma2,Shift0,Shift2,Omegas[BoundIndexLower:BoundIndexUpper])[0]
+            except IndexError:
+                lineshape_vals = PROFILE_SDVOIGT(LineCenterDB,GammaD,Gamma0,Gamma2,Shift0,Shift2,Omegas[BoundIndexLower:BoundIndexUpper])[0]
             Xsect[BoundIndexLower:BoundIndexUpper] += factor / NATURAL_ABUNDANCES[(MoleculeNumberDB,IsoNumberDB)] * \
                                                       ABUNDANCES[(MoleculeNumberDB,IsoNumberDB)] * \
                                                       LineIntensity * lineshape_vals
@@ -316,7 +314,10 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
     if File: save_to_file(File,Format,Omegas,Xsect)
     return Omegas,Xsect
 
-
+# Want to have verbose=False as optional parameter
+# then if verbose: look through all relevant parameters, see whether they exist
+# and if they exist, if the value is ever not zero.
+# Do this outside the line-by-line loop, so you only write once.
 def absorptionCoefficient_Voigt(Components=None,SourceTables=None,partitionFunction=PYTIPS,
                                 Environment=None,OmegaRange=None,OmegaStep=None,OmegaWing=None,
                                 IntensityThreshold=DefaultIntensityThreshold,
@@ -392,8 +393,8 @@ def absorptionCoefficient_Voigt(Components=None,SourceTables=None,partitionFunct
     if OmegaGrid is not None:
         Omegas = npsort(OmegaGrid)
     else:
-        Omegas = arange(OmegaRange[0],OmegaRange[1],OmegaStep)
-        #Omegas = arange_(OmegaRange[0],OmegaRange[1],OmegaStep) # fix
+        #Omegas = arange(OmegaRange[0],OmegaRange[1],OmegaStep)
+        Omegas = arange_(OmegaRange[0],OmegaRange[1],OmegaStep) # fix
     number_of_points = len(Omegas)
     Xsect = zeros(number_of_points)
 

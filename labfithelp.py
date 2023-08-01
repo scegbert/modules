@@ -631,8 +631,8 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
         if not os.path.exists(d_output): # make a new folder if needed
             os.makedirs(d_output)
         
-        d_file = r'\{}-000-og'.format(bin_name)
-        # d_file = r'\{}-000-HITRAN'.format(bin_name)
+        # d_file = r'\{}-000-og'.format(bin_name)
+        d_file = r'\{}-000-HITRAN'.format(bin_name)
         
         shutil.copy2(d_input + '.lwa', d_output + d_file + '.lwa') 
         shutil.copy2(d_input + '.sho', d_output + d_file + '.sho') # save a copy of all files as og files
@@ -646,7 +646,8 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
     return
     
 #%% 
-def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', features_constrain=[], nudge_sd = False, d_folder_input=None):
+def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', features_constrain=[], 
+                nudge_sd = False, nudge_delta_air = False, d_folder_input=None, features_new=None):
     r'''
     Overview: 
         float given feature for given feature (features can be list, prop needs to be single value)
@@ -684,8 +685,13 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
        
     for i in features: 
         
-        line = lines_until_features + lines_per_feature*i - 2
-    
+        if i > feature_new: 
+            i_closest = features_new.loc[i].closest # find a close feature and start your search there
+            line = int(lines_until_features + lines_per_feature*i_closest - 2)
+            
+        else: 
+            line = lines_until_features + lines_per_feature*i - 2
+        
         if int(rei_all[line-2].split()[0]) != i: # check if the feature changed places with a neighbor (nu)
             line = floated_line_moved(line, i, rei_all, lines_per_feature)
         
@@ -695,8 +701,14 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
             
             rei_all[line-1] = rei_all[line-1][0:-6] + '1' + rei_all[line-1][-5:] # change speed dependence from 0 to  0.10000 (recommendation of Brian)
             
+        if prop[0]=='delta_air' and nudge_delta_air: 
+        
+            # set all air shifts to 0 (linear -> exp.), shift exponenets to 1.0
+            rei_all[line-2] = rei_all[line-2][:72] + ' -0.0001000 ' + rei_all[line-2][84:]
+            
     if prop[0]=='sd_self' and nudge_sd: print('Speed dependence was nudged') # only print 1 time
-    
+    if prop[0]=='delta_air' and nudge_delta_air: print('Delta air was nudged') # only print 1 time
+        
     notfloated = []
     if len(features_constrain) > 0:
         print('constraint are being used (use_which = ' + use_which + ')')
@@ -721,12 +733,12 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
                 j=0
                 
                 for doubleti in doublet: 
-                
+                                        
                     line = lines_until_features + lines_per_feature*doubleti - 2
 
                     if int(rei_all[line-2].split()[0]) != doubleti: # if the feature changed places with a neighbor (change in nu)
                         line = floated_line_moved(line, doubleti, rei_all, lines_per_feature)
-
+                                        
                     if prop[0] == 'nu': doublet_value[j] = rei_all[line-2].split()[3] # line-2 = feature value, line = float 1's and 0's
                     elif prop[0] == 'sw': doublet_value[j] = rei_all[line-2].split()[4]
 
@@ -810,7 +822,7 @@ def floated_line_moved(line, i, rei_all, lines_per_feature):
         
         # print(str(int(rei_all[line_up].split()[0])) + '     ' + str(int(rei_all[line_down].split()[0]))) # who did you look at?
         
-        if j > 100: 
+        if j > 750: # we added 750 features, it could be pretty far away for air water :(
             print('   *****   I think we missed feature ' + str(i) + ' (we tried to check the nearest ' + str(j) + ' features)   *****   ')
             please = stophere # feature moved too far, lets stop and regroup
         
@@ -1352,8 +1364,9 @@ def compile_results(d_labfit, base_name_input, base_name_output, bins, d_save = 
 
 #%% feature sniffer (find which feature(s) is the problem)
 
-def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, props_which, prop_which2=False, prop_which3=False, 
-                    iter_sniff=5, unc_multiplier=1, d_labfit_main=True, new_type=False): 
+def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, props_which, 
+                    prop_which2=False, prop_which3=False, iter_sniff=5, unc_multiplier=1, 
+                    d_labfit_main=True, new_type=False, features_new=None): 
       
     if d_labfit_main is True: d_labfit_main = d_labfit
     
@@ -1372,10 +1385,13 @@ def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, 
 
         else: 
             # float lines, most recent saved REI in -> INP out
-            float_lines(d_labfit, bin_name, [feature], props[prop_which], 'rei_saved', d_folder_input=d_labfit_main) 
+            float_lines(d_labfit, bin_name, [feature], props[prop_which], 'rei_saved', d_folder_input=d_labfit_main,
+            features_new=features_new) 
             # INP -> INP, testing two at once (typically nu or n_self)
-            if prop_which2 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which2], 'inp_new', []) 
-            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'inp_new', [])
+            if prop_which2 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which2], 'inp_new', [],
+            features_new=features_new) 
+            if prop_which3 is not False: float_lines(d_labfit, bin_name, [feature], props[prop_which3], 'inp_new', [],
+            features_new=features_new)
         
         feature_error = None
         features_reject = [] # reset with each iteration
@@ -1407,7 +1423,8 @@ def feature_sniffer(features_test, d_labfit, bin_name, bins, prop_which, props, 
                                                     
                             features_reject.extend(df_props[df_props['uc_'+prop_i_df] > props[prop_i][4] * unc_multiplier].index.values.tolist())
                             
-                        features_reject.extend(df_props[df_props['gamma_self'] < 0.01].index.values.tolist()) # ditch features where gamma is going to 0
+                        try: features_reject.extend(df_props[df_props['gamma_self'] < 0.01].index.values.tolist()) # ditch features where gamma is going to 0
+                        except: features_reject.extend(df_props[df_props['gamma_air'] < 0.01].index.values.tolist()) # ditch features where gamma is going to 0
         
             if new_type is not False: feature_id = new_feature_number(bin_name, new_type, 0) # assumes we're always looking at feature #1 (one-by-one)
             else: feature_id = feature

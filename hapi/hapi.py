@@ -153,6 +153,7 @@ VARIABLES['DISPLAY_FETCH_URL'] = False
 # This effect is pronounced only if the step is sufficiently small.
 def arange_(lower,upper,step):
     npnt = floor((upper-lower)/step)+1
+    npnt=int(npnt)
     upper_new = lower + step*(npnt-1)
     if abs((upper-upper_new)-step) < 1e-10:
         upper_new += step
@@ -979,7 +980,7 @@ PARAMETER_META_ = \
     "selectable" : 1,
     "has_reference" : 1,
     "has_error" : 1
-  }, 
+  },
   "gamma_HT_0_self_50" : {
     "default_fmt" : "%6.4f",
   },
@@ -19106,7 +19107,6 @@ def absorptionCoefficient_Lorentz(Components=None,SourceTables=None,partitionFun
                                 IntensityThreshold=DefaultIntensityThreshold,
                                 OmegaWingHW=DefaultOmegaWingHW,
                                 GammaL='gamma_air', HITRAN_units=True, LineShift=True,
-                                File=None, Format=None, OmegaGrid=None,
                                 WavenumberRange=None,WavenumberStep=None,WavenumberWing=None,
                                 WavenumberWingHW=None,WavenumberGrid=None,
                                 Diluent={},EnvDependences=None):
