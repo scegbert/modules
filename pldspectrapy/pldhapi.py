@@ -235,10 +235,10 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
 
                 gamma_name = 'gamma_' + species_lower
                 try:
-                    Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID] # normal HITRAN line
-                    # if gamma_floated is False: Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID] # normal HITRAN line
-                    # else: Gamma0DB = gamma_floated # for calculating concentrations, we want to float the widths to get a good fit
                     
+                    if gamma_floated is False: Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID] # normal HITRAN line
+                    else: Gamma0DB = gamma_floated # for calculating concentrations, we want to float the widths to get a good fit
+                                        
                 except:
                     Gamma0DB = 0.0
 
@@ -250,9 +250,7 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
                 except:
                     #TempRatioPowerDB = 0
                     TempRatioPowerDB = LOCAL_TABLE_CACHE[TableName]['data']['n_air'][RowID]
-                
-                if gamma_floated is True: TempRatioPowerDB += gamma_floated # what if we vary temp. dep. by constant? 
-                
+                                
                 # Add to the final Gamma0
                 Gamma0 += abun*CustomEnvDependences.get(gamma_name, # default ->
                           EnvironmentDependency_Gamma0(Gamma0DB,T,Tref,p,pref,TempRatioPowerDB))
@@ -296,10 +294,8 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
                 SD_name = 'sd_' + species_lower
                 try:
                     
-                    SDDB = LOCAL_TABLE_CACHE[TableName]['data'][SD_name][RowID] # normal HITRAN line
-                    # if sd_floated is False: SDDB = LOCAL_TABLE_CACHE[TableName]['data'][SD_name][RowID] # normal HITRAN line
-                    # else: SDDB = sd_floated # for calculating concentrations, we want to float the widths to get a good fit
-                    if sd_floated is True: SDDB += sd_floated
+                    if sd_floated is False: SDDB = LOCAL_TABLE_CACHE[TableName]['data'][SD_name][RowID] # normal HITRAN line
+                    else: SDDB = sd_floated # for calculating concentrations, we want to float the widths to get a good fit
                     
                 except:
                     SDDB = 0.0
