@@ -89,7 +89,7 @@ def trim(data_in, wvn_range):
     
     return data_out
 #%%
-def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_external_load=False):
+def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_external_load=False, d_load=False):
     r'''
     Overview:
         pull data out of labfit DTL file (fit parameters and uncertainties)
@@ -102,7 +102,9 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
     
     if df_external_load is False: 
 
-        d_load = os.path.join(d_labfit, bin_name) # location of measurement file (folder)
+        if d_load is False: d_load = os.path.join(d_labfit, bin_name) # location of measurement file (folder)
+        else: d_load = d_load   
+        
         wvn_range = bins[bin_name][1:3] # wavenumber range of relevant bin - trimming off any chebyshev buffer that may exist
         
         df_load = trim(db.labfit_to_df(d_load, htp=False), wvn_range) # open and trim old database
@@ -110,13 +112,13 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
         if d_old is not None: 
             df_old = trim(db.labfit_to_df(d_old, htp=False), wvn_range) # open and trim old database
             df_load['nu_og'] = df_old.nu
-     
+        
     else: df_load = df_external_load
-         
+        
     if cutoff_s296 is not None: 
         cutoff_strength_atT = np.zeros((len(df_load.elower), 1))
         cutoff_strength = np.zeros((len(df_load.elower), 1))
-       
+        
         df_ratio = pd.DataFrame()
         
         for T_i in sorted(set(T)):
@@ -374,6 +376,7 @@ def labfit_to_spectra(d_labfit, bins, bin_name, og = False, d_load=False):
     if d_load is False: d_load = os.path.join(d_labfit, bin_name)
 
     if og == True: d_load = os.path.join(d_load, bin_name + '-000-og') # grab the og LWA file from the bin folder
+    elif og != False: d_load = og
     
     lwa_all = open(d_load+'.lwa', "r").readlines()
     

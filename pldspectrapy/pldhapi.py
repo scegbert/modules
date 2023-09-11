@@ -48,7 +48,8 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
                                 File=None, Format=None, OmegaGrid=None,
                                 WavenumberRange=None,WavenumberStep=None,WavenumberWing=None,
                                 WavenumberWingHW=None,WavenumberGrid=None,
-                                Diluent={},EnvDependences=None):
+                                Diluent={},EnvDependences=None, 
+                                gamma_floated=False, sd_floated=False):
     """
     INPUT PARAMETERS:
         Components:  list of tuples [(M,I,D)], where
@@ -234,7 +235,10 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
 
                 gamma_name = 'gamma_' + species_lower
                 try:
-                    Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID]
+                                       
+                    if gamma_floated is False: Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID] # normal HITRAN line
+                    else: Gamma0DB = gamma_floated # for calculating concentrations, we want to float the widths to get a good fit
+                    
                 except:
                     Gamma0DB = 0.0
 
@@ -266,7 +270,7 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
 
                 deltap = 0.0
                 try:
-                    deltap = LOCAL_TABLE_CACHE[TableName]['data'][deltap_name][RowID]
+                    deltap = LOCAL_TABLE_CACHE[TableName]['data'][deltap_name][RowID] # linear pressure shift temp. dep. (don't use)
                     power_law_shift = False
                 except KeyError:
                     power_law_shift = True
@@ -284,11 +288,15 @@ def absorptionCoefficient_SDVoigt(Components=None,SourceTables=None,partitionFun
                         n_delta = 1
                     Shift0 += abun*CustomEnvDependences.get(delta_name,
                                 (Shift0DB * (Tref/T)**n_delta * p))
+
                 # End pld_update
 
                 SD_name = 'sd_' + species_lower
                 try:
-                    SDDB = LOCAL_TABLE_CACHE[TableName]['data'][SD_name][RowID]
+                    
+                    if sd_floated is False: SDDB = LOCAL_TABLE_CACHE[TableName]['data'][SD_name][RowID] # normal HITRAN line
+                    else: SDDB = sd_floated # for calculating concentrations, we want to float the widths to get a good fit
+                    
                 except:
                     SDDB = 0.0
 
@@ -326,7 +334,8 @@ def absorptionCoefficient_Voigt(Components=None,SourceTables=None,partitionFunct
                                 File=None, Format=None, OmegaGrid=None,
                                 WavenumberRange=None,WavenumberStep=None,WavenumberWing=None,
                                 WavenumberWingHW=None,WavenumberGrid=None,
-                                Diluent={},EnvDependences=None):
+                                Diluent={},EnvDependences=None, 
+                                keep_HT=False, float_air_width=False):
     """
     INPUT PARAMETERS:
         Components:  list of tuples [(M,I,D)], where
@@ -350,6 +359,7 @@ def absorptionCoefficient_Voigt(Components=None,SourceTables=None,partitionFunct
     OUTPUT PARAMETERS:
         Wavenum: wavenumber grid with respect to parameters WavenumberRange and WavenumberStep
         Xsect: absorption coefficient calculated on the grid
+        keep_HT: don't bail out HITRAN and make the linear shift exponential
     ---
     DESCRIPTION:
         Calculate absorption coefficient using Voigt profile.
@@ -503,13 +513,18 @@ def absorptionCoefficient_Voigt(Components=None,SourceTables=None,partitionFunct
             #   pressure broadening coefficient
             Gamma0 = 0.; Shift0 = 0.;
             for species in Diluent:
+            
                 species_lower = species.lower()
 
                 abun = Diluent[species]
 
                 gamma_name = 'gamma_' + species_lower
                 try:
-                    Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID]
+                    
+                    if float_air_width is False: Gamma0DB = LOCAL_TABLE_CACHE[TableName]['data'][gamma_name][RowID]
+                    else: 
+                        Gamma0DB = float_air_width # for calculating concentrations, we want to float the widths to get a good fit
+                    
                 except:
                     Gamma0DB = 0.0
 
@@ -544,7 +559,12 @@ def absorptionCoefficient_Voigt(Components=None,SourceTables=None,partitionFunct
                     Shift0 += abun*CustomEnvDependences.get(delta_name, # default ->
                               ((Shift0DB + deltap*(T-Tref))*p/pref))
                 else:
-                    Shift0 += abun*Shift0DB*Tref/T*p
+                    
+                    if keep_HT: # use the data the way HITRAN intended (this makes things worse)
+                        Shift0 += abun*CustomEnvDependences.get(delta_name, # default ->
+                              ((Shift0DB + deltap*(T-Tref))*p/pref))
+                    else: 
+                        Shift0 += abun*Shift0DB*Tref/T*p # Amanda added this power law approximation (n=1) to help the data
                 # End pld_update
 
 

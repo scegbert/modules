@@ -141,7 +141,8 @@ To be called using lmfit nonlinear least-squares
 
 
 def spectra_single(xx, mol_id, iso, molefraction, pressure, 
-                   temperature, pathlength, shift, name = 'H2O', flip_spectrum=False):
+                   temperature, pathlength, shift, name = 'H2O', flip_spectrum=False,
+                    float_air_width=False):
     '''
     Spectrum calculation for adding multiple models with composite model.
     
@@ -165,7 +166,9 @@ def spectra_single(xx, mol_id, iso, molefraction, pressure,
             name, HITRAN_units=False,
             OmegaGrid = xx + shift,
             Environment={'p':pressure,'T':temperature},
-            Diluent={'self':molefraction,'air':(1-molefraction)})
+            Diluent={'self':molefraction,'air':(1-molefraction)}, 
+            float_air_width=float_air_width)
+    
     if flip_spectrum:
         TD_fit = np.fft.irfft(coef[::-1] * pathlength)
     else:
@@ -205,7 +208,10 @@ def spectra_single_apodized(xx_orig, mol_id, iso, molefraction, pressure,
         baseline -> nominal baseline shape, needs to end at 0s or fft is mad
         
     '''
-        
+    
+    keep_HT = True # use Amanda's override to convert linear shift to power law (helps but is technically wrong) if True
+    
+    
     # generate pre-apodized array of absorption coefficients
     coef = np.zeros(np.shape(xx_orig))
 
@@ -213,7 +219,8 @@ def spectra_single_apodized(xx_orig, mol_id, iso, molefraction, pressure,
             name, HITRAN_units=False,
             OmegaGrid = xx_orig[i_fit_start:i_fit_stop] + shift,
             Environment={'p':pressure,'T':temperature},
-            Diluent={'self':molefraction,'air':(1-molefraction)})
+            Diluent={'self':molefraction,'air':(1-molefraction)}, 
+            keep_HT=keep_HT)
             # note that nu is unused (shift gets dropped in reported data, so that it matches measurement)
 
     # fftshift center burst to center
@@ -235,7 +242,7 @@ def spectra_single_apodized(xx_orig, mol_id, iso, molefraction, pressure,
         
     return TD_fit
     
-def spectra_single_lmfit(prefix='', sd = False, apod = False):
+def spectra_single_lmfit(prefix='', sd = False, apod = False, float_air_width=False):
     '''
     Set up lmfit model with function hints for single absorption species
     '''
@@ -259,7 +266,13 @@ def spectra_single_lmfit(prefix='', sd = False, apod = False):
         mod.set_param_hint('i_fit_stop',min=0,vary = False)
         mod.set_param_hint('ppig_apod',min=0,vary = False)
         mod.set_param_hint('zero_pad',value=False,vary = False) # untested
-    
+        
+    if float_air_width is not False: 
+        mod.set_param_hint('gamma_floated',value=0.1,vary = True)
+        
+        if sd == True: 
+            mod.set_param_hint('sd_floated',value=0.13,vary = True)
+        
     pars = mod.make_params()
     
     # let's set up some default thermodynamics
@@ -321,7 +334,9 @@ def spectra_cross_section(xx, xx_HITRAN, coef_HITRAN, molefraction, pressure, te
     return TD_fit
     
 def spectra_sd(xx, mol_id, iso, molefraction, pressure, 
-                   temperature, pathlength, shift, name = 'H2O', flip_spectrum=False):
+                   temperature, pathlength, shift,                    
+                   name = 'H2O', flip_spectrum=False, 
+                   gamma_floated = False, sd_floated = False, ):
     '''
     Spectrum calculation for adding multiple models with composite model.
     
@@ -345,7 +360,8 @@ def spectra_sd(xx, mol_id, iso, molefraction, pressure,
             name, HITRAN_units=False,
             OmegaGrid = xx + shift,
             Environment={'p':pressure,'T':temperature},
-            Diluent={'self':molefraction,'air':(1-molefraction)})
+            Diluent={'self':molefraction,'air':(1-molefraction)}, 
+            gamma_floated=gamma_floated, sd_floated=sd_floated)
     if flip_spectrum:
         TD_fit = np.fft.irfft(coef[::-1] * pathlength)
     else:
