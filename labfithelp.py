@@ -526,7 +526,7 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
                          'c1', markersize=30, label='floated '+prop2[1]) # overlay floated features
         
         if features is not False:
-            plt.plot(df[df.index.isin(features)].nu, df[df.index.isin(features)].ratio_max+100, 'y3', markersize=20, color='k', label='verify') # overlay other features
+            plt.plot(df[df.index.isin(features)].nu, df[df.index.isin(features)].ratio_max+100, 'y3', markersize=30, color='m', label='verify') # overlay other features
         
         for j in df.index:
             j = int(j)
@@ -588,7 +588,7 @@ def newest_rei(d_folder, bin_name):
 
     i = 0
     file_extension = ''
-    while file_extension != '.rei': # find the lowest numbered rei file (skip over other files like folders and notes)
+    while file_extension != '.rei': # find the highest numbered rei file (skip over other files like folders and notes)
         i-=1
         file_name = os.listdir(d_folder)[i]
         file_extension = file_name[-4:]
@@ -676,10 +676,15 @@ def float_lines(d_folder, bin_name, features, prop, use_which='rei_new', feature
     if use_which == 'rei_new': rei_all = open(d_file+'.rei', "r").readlines() # newest REI file (being used by labfit)
     elif use_which == 'inp_new': rei_all = open(d_file+'.inp', "r").readlines() # newest INP file (being used by labfit)
     elif use_which == 'rei_saved': # revert to most recent saved REI file
-    
+       
         [_, use_which] = newest_rei(os.path.join(d_folder_input, bin_name), bin_name)
         rei_all = open(os.path.join(d_folder_input, bin_name, use_which), "r").readlines()
-    
+   
+    elif use_which == 'inp_saved': # revert to most recent saved INP file
+   
+       [_, use_which] = newest_rei(os.path.join(d_folder_input, bin_name), bin_name)
+       rei_all = open(os.path.join(d_folder_input, bin_name, use_which)[:-3] + 'inp', "r").readlines()
+   
     else: rei_all = open(use_which+'.rei', "r").readlines() # grab whatever the string tells you to get
     
     print('use_which = ' + use_which)
@@ -1178,7 +1183,8 @@ def run_labfit(d_labfit, bin_name, use_rei=False, time_limit=120):
     
     if os.path.isfile(bin_name+'.lwa'): os.remove(bin_name+'.lwa') # remove old file
     
-    sp = subprocess.Popen(['labfit.exe'], stdin=subprocess.PIPE, shell=False)
+    sp = subprocess.Popen(['labfit.exe'], stdin=subprocess.PIPE, shell=False, 
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     poll_code = None # None = not done running, 0 = done running
     i = 0
