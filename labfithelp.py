@@ -376,7 +376,6 @@ def labfit_to_spectra(d_labfit, bins, bin_name, og = False, d_load=False):
     if d_load is False: d_load = os.path.join(d_labfit, bin_name)
 
     if og == True: d_load = os.path.join(d_load, bin_name + '-000-og') # grab the og LWA file from the bin folder
-    elif og != False: d_load = og
     
     lwa_all = open(d_load+'.lwa', "r").readlines()
     
@@ -597,7 +596,7 @@ def newest_rei(d_folder, bin_name):
         
     return [num_file, file_name]
 
-def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_og=False): 
+def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_og=False, num_file=False): 
     r'''
     Overview:
         save the REI file from the most recent iteration of labfit
@@ -616,8 +615,8 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
     d_output = os.path.join(d_folder_output, bin_name)
 
     if d_og is False: 
-
-        [num_file, _] = newest_rei(d_output, bin_name)
+        
+        if num_file == False: [num_file, _] = newest_rei(d_output, bin_name)
 
         d_output = os.path.join(d_folder_output, bin_name, bin_name + '-' + str(num_file+1).zfill(3) + '-' + d_save_name) # avoid over writing existing files by adding 1 to file name
         
@@ -821,7 +820,7 @@ def floated_line_moved(line, i, rei_all, lines_per_feature):
             line = line_up + 2
             line_missing = False
         
-        j += 1        
+        j += 1 
         
         line_down = line - j*lines_per_feature - 2 # at lower wavenumbers (alternating)
         if int(rei_all[line_down].split()[0]) == i:                 
@@ -830,7 +829,7 @@ def floated_line_moved(line, i, rei_all, lines_per_feature):
         
         # print(str(int(rei_all[line_up].split()[0])) + '     ' + str(int(rei_all[line_down].split()[0]))) # who did you look at?
         
-        if j > 750: # we added 750 features, it could be pretty far away for air water :(
+        if j > 1000: # we added 500 features, it could be pretty far away for air water :(
             print('   *****   I think we missed feature ' + str(i) + ' (we tried to check the nearest ' + str(j) + ' features)   *****   ')
             please = stophere # feature moved too far, lets stop and regroup
         
