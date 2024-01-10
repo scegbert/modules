@@ -47,7 +47,7 @@ lines_header_lwa = 18 # number of lines per header in lwa file
 
 #%% measurement specific parameters
 
-meas_T_round = 50 # round meaurement temperature to the nearest value (allows 905 and 895 to be grouped together if desired)
+meas_T_round = 100 # round meaurement temperature to the nearest value (allows 905 and 895 to be grouped together if desired)
 meas_P_round = 0.5 # round measurement pressure to the nearest value (0.5 groups pressure as 0.5, 1.0, 1.5, 16.5, etc.)
 
 q0offset = 0 # how many 0's come before the actual quantum number pairs (I have seen 0 and 2)
@@ -136,9 +136,23 @@ def information_df(d_labfit, bin_name, bins, cutoff_s296, T, d_old=None, df_exte
     
     else: df_load['ratio_max'] = 0 # check everything if no cuttoff is given
             
-    return quantum_assignments(df_load)
+    return quantum_assignments_h2o(df_load) # quantum_assignments_co(df_load)
 #%%
-def quantum_assignments(df_load): 
+def quantum_assignments_co(df_load): 
+    # improve organization of the quantum information 
+    
+    quanta = df_load.quanta.str.replace('-',' -').replace('q','').str.split(expand=True) # looking for doublets (watch out for negative quanta without spaces, ie -2-2-2)
+        
+    df_load['vp'] = quanta[0].astype(int)
+    df_load['vpp'] = quanta[1].astype(int)
+
+    df_load['branch'] = quanta[2]
+    df_load['J'] = quanta[3].astype(int) 
+            
+    return df_load
+
+
+def quantum_assignments_h2o(df_load): 
     # improve organization of the quantum information 
     
     quanta = df_load.quanta.str.replace('-',' -').replace('q','').str.split(expand=True) # looking for doublets (watch out for negative quanta without spaces, ie -2-2-2)
@@ -476,7 +490,7 @@ def strength_T(T, elower, nu, Tref=296, molec_id = 1, iso = 1):
     
     return Qref/Q * boltzman * stimulated # S(T) = S(Tref) * Qref/Q * boltzman * stimulated 
 #%%
-def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=False, features=False, axis_labels=True, all_names=True):
+def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=False, features=False, axis_labels=True, all_names=True, doublets=True):
     r'''
     Overview:
         plots output of labfit_to_spectra grouping things by temperature (or whatever variable you feed in as T)
@@ -510,9 +524,10 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
                 if value: 
                     plt.plot([df.loc[index].nu_og, df.loc[index].nu], [df.loc[index].ratio_max_og+100, df.loc[index].ratio_max+100], color='k')
         
-        # overlay the doublets and reversals
-        plt.plot(df.nu[df.doublets.astype(bool)], df[df.doublets.astype(bool)].ratio_max+100, 'g+', markersize=10, label='doublets') 
-        plt.plot(df.nu[df.reversed.astype(bool)], df[df.reversed.astype(bool)].ratio_max+100, 'bx', markersize=10, label='reversed') 
+        if doublets: 
+            # overlay the doublets and reversals
+            plt.plot(df.nu[df.doublets.astype(bool)], df[df.doublets.astype(bool)].ratio_max+100, 'g+', markersize=10, label='doublets') 
+            plt.plot(df.nu[df.reversed.astype(bool)], df[df.reversed.astype(bool)].ratio_max+100, 'bx', markersize=10, label='reversed') 
         
         if prop is not False:
             plt.plot(df[df['uc_'+prop[0]] > -1].nu, 
@@ -530,25 +545,31 @@ def plot_spectra(T,wvn,trans,res,res_og, df=False, offset=2, prop=False, prop2=F
         for j in df.index:
             j = int(j)
             
-            if np.round(df.mass[j],2) == 18.01: # watch out for isotopes
+            if df.local_iso_id[j] == '1': # watch out for isotopes
                 colorj = 'k'
             else: 
                 colorj = 'r' # usually below noise floor
-            
+
             doub_rev_names = ''
-            if df.doublets.astype(bool)[j]: 
-                
-                for doublet in df.doublets[j]: 
-                    if doublet == df.doublets[j][0]: doub_rev_names += ' d' + str(int(doublet))
-                    else: doub_rev_names += ', d' + str(int(doublet))
-                
-            if df.reversed.astype(bool)[j]: doub_rev_names += ' r' + str(int(df.reversed[j][0]))
-                                
-            if all_names is False: 
-                if features is not False: 
-                    if j in features: 
-                        plt.annotate('  '+str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
-                
+            
+            if doublets:
+
+                if df.doublets.astype(bool)[j]: 
+                    
+                    for doublet in df.doublets[j]: 
+                        if doublet == df.doublets[j][0]: doub_rev_names += ' d' + str(int(doublet))
+                        else: doub_rev_names += ', d' + str(int(doublet))
+                    
+                if df.reversed.astype(bool)[j]: doub_rev_names += ' r' + str(int(df.reversed[j][0]))
+                                    
+                if all_names is False: 
+                    if features is not False: 
+                        if j in features: 
+                            plt.annotate('  '+str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+
+                else: 
+                    plt.annotate('  '+str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for doublets
+                    
             else: 
                 plt.annotate('  '+str(j) + doub_rev_names,(df.nu[j], df.ratio_max[j]+100),color=colorj) # add feature identifier for non-doublets
          
@@ -582,8 +603,13 @@ def newest_rei(d_folder, bin_name):
         else: i_start = 4; i_stop = 7 # index by 1 if double digit bin (ie B12)
     
     except: # if there was a letter at the end of the bin name (ie B2a for air)
-        if int(bin_name[1:-1]) < 9.5: i_start = 4; i_stop = 7 # try taking off the first and last character
-        else: i_start = 5; i_stop = 8 # index by 1 if double digit bin (ie B12a)
+        try: 
+            if int(bin_name[1:-1]) < 9.5: i_start = 4; i_stop = 7 # try taking off the first and last character
+            else: i_start = 5; i_stop = 8 # index by 1 if double digit bin (ie B12a)
+        except: 
+            i_start = 6; i_stop = 9 #  index for bin named CO_Ar (5 digits long)
+            
+
 
     i = 0
     file_extension = ''
@@ -633,8 +659,8 @@ def save_file(d_folder_output, bin_name, d_save_name='', d_folder_input=None, d_
         if not os.path.exists(d_output): # make a new folder if needed
             os.makedirs(d_output)
         
-        # d_file = r'\{}-000-og'.format(bin_name)
-        d_file = r'\{}-000-HITRAN'.format(bin_name)
+        d_file = r'\{}-000-og'.format(bin_name)
+        # d_file = r'\{}-000-HITRAN'.format(bin_name)
         
         shutil.copy2(d_input + '.lwa', d_output + d_file + '.lwa') 
         shutil.copy2(d_input + '.sho', d_output + d_file + '.sho') # save a copy of all files as og files
@@ -1166,6 +1192,7 @@ def run_labfit(d_labfit, bin_name, use_rei=False, time_limit=120):
         
     r'''
     
+    file_path = os.path.abspath('')
     os.chdir(d_labfit) # change directory to labfit folder
     
     if use_rei: 
@@ -1241,7 +1268,7 @@ def run_labfit(d_labfit, bin_name, use_rei=False, time_limit=120):
     
         feature_error = 'no LWA'
         
-    os.chdir("..") # change directory back to where the python script lives
+    os.chdir(file_path) # change directory back to where the python script lives
 
     return feature_error
 #%%
